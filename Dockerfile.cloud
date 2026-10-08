@@ -1,0 +1,27 @@
+# 离线/云部署：包内已含 models/ + data/ 向量，构建时不访问 HuggingFace
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-vod-export.txt ./
+# CPU-only torch（避免 CUDA 依赖把镜像撑到 6GB+）
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r requirements-vod-export.txt
+COPY . .
+
+RUN python -c "\
+from server.embedding_model import is_valid_model_dir, DEFAULT_LOCAL_DIR; \
+assert is_valid_model_dir(DEFAULT_LOCAL_DIR), \
+    f'bundled model missing or invalid: {DEFAULT_LOCAL_DIR}'"
+
+RUN test -f data/faiss_index.bin || python -m data.generate_data
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

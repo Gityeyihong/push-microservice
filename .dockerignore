@@ -1,0 +1,20 @@
+.git
+__pycache__
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.hypothesis
+.venv
+venv
+
+# runtime / local state
+data/sessions
+data/training
+logs
+reports/*.jsonl
+
+# tests & docs not needed at runtime
+tests
+docs
+deploy
+*.md

@@ -1,0 +1,13 @@
+[project]
+name = "push-microservice"
+version = "1.0.0"
+description = "Standalone intelligent push microservice (local MiniLM + FAISS + self-training)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: 需真实模型/数据/网络的集成脚本",
+]

@@ -1,0 +1,98 @@
+{
+
+  "version": "1",
+
+  "target_push_rate_per_10": 2.5,
+
+  "min_push_rate_per_10": 0.6,
+
+  "max_push_rate_per_10": 2.5,
+
+  "tau_init": 0.55,
+
+  "tau_min": 0.3,
+
+  "tau_max": 2.0,
+
+  "tau_positive_mult": 0.92,
+
+  "tau_negative_mult": 1.08,
+
+  "a_threshold_0": 0.64,
+
+  "a_threshold_1": 0.72,
+
+  "a_threshold_2": 0.85,
+
+  "auto_video_target_rate": 0.25,
+
+  "auto_video_quota_min_similarity": 0.42,
+
+  "auto_video_quota_cooldown_msgs": 3,
+
+  "auto_advisor_target_rate": 0.10,
+
+  "auto_advisor_effective_rate": null,
+
+  "auto_advisor_quota_cooldown_msgs": 2,
+
+  "auto_advisor_quota_min_session_msgs": 1,
+
+  "advisor_push_cooldown_ms": 300000,
+
+  "advisor_session_push_cap": 3,
+
+  "a_weights": {
+
+    "I": 0.18,
+
+    "L": 0.22,
+
+    "F": 0.32,
+
+    "S": 0.10,
+
+    "U": 0.18
+
+  },
+
+  "f_default_new_user": 0.6,
+
+  "urge_initial": 0.5,
+
+  "urge_delta": 0.07,
+
+  "urge_active_video_decay": 0.7,
+
+  "cooldown_ms": 90000,
+
+  "cooldown_ms_max": 90000,
+
+  "state_modulation": {
+
+    "INIT": -0.04,
+
+    "GATHERING": -0.02,
+
+    "DEEPENING": 0.0,
+
+    "TAILORING": 0.06
+
+  },
+
+  "recent_push_window_ms": 300000,
+
+  "recent_push_load_divisor": 3,
+
+  "session_msg_cap": 30,
+
+  "auto_push_min_session_msgs": 2,
+
+  "mentor_a_boost": 0.05,
+
+  "mentor_cooldown_ms": 55000,
+
+  "mentor_urge_delta_bonus": 0.02
+
+}
+

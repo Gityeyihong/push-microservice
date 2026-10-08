@@ -1,0 +1,25 @@
+# Normalize to LF in the repository regardless of OS
+* text=auto eol=lf
+
+# Shell scripts must be LF
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Python / configs
+*.py text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+
+# Binary / generated artifacts
+*.npy binary
+*.bin binary
+*.safetensors binary
+*.onnx binary
+*.gguf binary
+*.png binary
+*.jpg binary
+*.webp binary

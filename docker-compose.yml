@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:6-alpine
+    container_name: push-system-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build: .
+    image: push-microservice:latest
+    container_name: push-system-server
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - HMAC_SECRET_KEY=${HMAC_SECRET_KEY:-change-this-in-production}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped

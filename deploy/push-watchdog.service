@@ -1,0 +1,9 @@
+[Unit]
+Description=Push microservice health watchdog
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=PUSH_DIR=/opt/push-microservice
+ExecStart=/bin/bash /opt/push-microservice/scripts/push_watchdog.sh

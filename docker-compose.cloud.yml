@@ -1,0 +1,48 @@
+services:
+  redis:
+    image: redis:6-alpine
+    pull_policy: never
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  push:
+    image: push-microservice:latest
+    pull_policy: never
+    env_file:
+      - .env
+    command:
+      - sh
+      - -c
+      - exec uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers $${PUSH_SERVER_WORKERS:-1}
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      HMAC_SECRET_KEY: ${HMAC_SECRET_KEY:-change-this-in-production}
+      PUSH_USE_MOCK_VECTORS: ${PUSH_USE_MOCK_VECTORS:-0}
+      PUSH_SERVER_WORKERS: ${PUSH_SERVER_WORKERS:-1}
+      PUSH_ADMIN_TOKEN: ${PUSH_ADMIN_TOKEN:-}
+      PUSH_INTERNAL_TOKEN: ${PUSH_INTERNAL_TOKEN:-}
+      DECISION_CONFIG_PATH: /app/config/decision_config.json
+      PUSH_CONFIG_DIR: /app/config
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:rw
+      - ./server:/app/server:ro
+      - ./mobile:/app/mobile:ro
+      - ./data:/app/data:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+

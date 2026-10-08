@@ -1,0 +1,10 @@
+[Unit]
+Description=Run push microservice watchdog hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Unit=push-watchdog.service
+
+[Install]
+WantedBy=timers.target
