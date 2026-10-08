@@ -43,29 +43,59 @@ def train(
     if not samples:
         raise ValueError("empty training set")
 
+    loss_name = str(params.get("loss", "mnrl_weighted"))
     model = SentenceTransformer(_resolve_base(base_model_path))
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    epochs = int(params.get("epochs", 3))
+    batch_size = int(params.get("batch_size", 32))
+    warmup = float(params.get("warmup_ratio", 0.1))
+    max_steps = int(params.get("max_steps", -1))
+
+    if loss_name == "soft_cosine":
+        examples = [
+            InputExample(texts=[s.get("anchor", ""), s.get("positive", "")], label=float(s.get("reward", 1.0)))
+            for s in samples
+            if s.get("anchor") and s.get("positive")
+        ]
+        if not examples:
+            raise ValueError("no usable training examples")
+        loader = DataLoader(examples, shuffle=True, batch_size=batch_size)
+        loss = losses.CosineSimilarityLoss(model)
+        steps = max(1, int(len(loader) * epochs * warmup))
+        model.fit(train_objectives=[(loader, loss)], epochs=epochs, warmup_steps=steps,
+                  output_path=str(output_dir), show_progress_bar=False)
+        return str(output_dir)
+
     examples = []
+    weights = []
     for s in samples:
         texts = [s.get("anchor", ""), s.get("positive", "")]
         texts.extend(n for n in (s.get("negatives") or []) if n)
         texts = [t for t in texts if t]
         if len(texts) >= 2:
             examples.append(InputExample(texts=texts))
+            weights.append(max(0.05, float(s.get("reward", 1.0) or 1.0)))
     if not examples:
         raise ValueError("no usable training examples")
 
+    sampler = None
+    try:
+        from torch.utils.data import WeightedRandomSampler
+
+        sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+    except Exception:
+        sampler = None
+
     loader = DataLoader(
         examples,
-        shuffle=True,
-        batch_size=int(params.get("batch_size", 32)),
+        batch_size=batch_size,
+        shuffle=sampler is None,
+        sampler=sampler,
     )
     loss = losses.MultipleNegativesRankingLoss(model)
-    epochs = int(params.get("epochs", 3))
-    warmup = float(params.get("warmup_ratio", 0.1))
-    steps = max(1, int(len(loader) * epochs * warmup))
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    steps = max_steps if max_steps > 0 else max(1, int(len(loader) * epochs * warmup))
     model.fit(
         train_objectives=[(loader, loss)],
         epochs=epochs,

@@ -1,4 +1,4 @@
-"""A/B experiment and profile resolution for push decision config."""
+"""A/B experiment and profile resolution for the policy config."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mobile.decision_config import load_decision_config
+from policy.config import load_policy_config
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
@@ -19,18 +19,18 @@ def _config_dir() -> Path:
 
 
 def profiles_path() -> Path:
-    return _config_dir() / "decision_profiles.json"
+    return _config_dir() / "policy_profiles.json"
 
 
 def ab_experiment_path() -> Path:
     return _config_dir() / "ab_experiment.json"
 
 
-def decision_config_path() -> Path:
-    custom = os.environ.get("DECISION_CONFIG_PATH", "").strip()
+def policy_config_path() -> Path:
+    custom = os.environ.get("POLICY_CONFIG_PATH", "").strip()
     if custom:
         return Path(custom)
-    return _config_dir() / "decision_config.json"
+    return _config_dir() / "policy.json"
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -66,9 +66,7 @@ def load_ab_experiment() -> dict:
         ab_experiment_path(),
         {"active": False, "name": "", "variant_a": "", "variant_b": "", "split_b_percent": 50},
     )
-    if not isinstance(data, dict):
-        return {"active": False}
-    return data
+    return data if isinstance(data, dict) else {"active": False}
 
 
 def save_ab_experiment(data: dict) -> None:
@@ -82,12 +80,10 @@ def _session_variant(session_id: str, split_b_percent: int) -> str:
 
 
 def resolve_config_for_session(session_id: str | None = None) -> dict:
-    """Base decision_config merged with A/B profile override when active."""
-    base = load_decision_config().to_dict()
+    base = load_policy_config().to_dict()
     exp = load_ab_experiment()
     if not exp.get("active"):
         return base
-
     profiles = load_profiles().get("profiles", {})
     variant = _session_variant(session_id or "default", int(exp.get("split_b_percent", 50)))
     profile_name = exp.get("variant_b") if variant == "b" else exp.get("variant_a")
@@ -96,8 +92,7 @@ def resolve_config_for_session(session_id: str | None = None) -> dict:
     overlay = profiles.get(profile_name)
     if not isinstance(overlay, dict):
         return base
-    merged = {**base, **overlay}
-    return merged
+    return {**base, **overlay}
 
 
 def get_ab_status() -> dict:

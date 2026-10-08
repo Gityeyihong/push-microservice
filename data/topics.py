@@ -1,17 +1,16 @@
 TOPIC_WORDS = [
-    "冷战",
-    "异地恋",
-    "分手挽回",
-    "第一次约会",
-    "沟通技巧",
-    "吃醋",
-    "信任建立",
-    "表白",
-    "吵架和好",
-    "安全感",
-    "父母反对",
-    "前任",
+    "getting_started",
+    "account",
+    "billing",
+    "troubleshooting",
+    "integrations",
+    "security",
+    "performance",
+    "best_practices",
+    "faq",
+    "onboarding",
+    "tutorials",
+    "release_notes",
 ]
 
-HELP_TOPIC_TEXT = "求助 需要帮助 绝望 情感危机 心理辅导"
-ADVISOR_KEYWORDS_URGENT = ["绝望", "活不下去", "自残", "自杀"]
+HELP_TOPIC_TEXT = "help urgent support escalation cannot proceed need assistance"

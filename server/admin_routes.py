@@ -1,4 +1,4 @@
-"""Push admin API routes."""
+"""Admin API routes."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from pydantic import BaseModel, Field
 
 from .admin_audit import append_audit, read_audit
 from .ab_resolver import (
-    decision_config_path,
     get_ab_status,
     load_ab_experiment,
     load_profiles,
+    policy_config_path,
     save_ab_experiment,
     save_profiles,
 )
-from .models import DecisionConfigModel
+from .models import PolicyConfigModel
 
 router = APIRouter(prefix="/admin", tags=["push-admin"])
 
@@ -38,41 +38,35 @@ def _sessions_dir() -> Path:
 
 
 def _touch_config_mtime() -> None:
-    """Ensure mtime changes so _current_decision_config reloads."""
-    path = decision_config_path()
+    path = policy_config_path()
     if path.exists():
         path.touch()
 
 
 @router.get("/status")
 async def admin_status(_: None = Depends(require_push_admin)):
-    from .main import _current_decision_config, cache_service, vector_service
+    from .main import _current_policy_config, cache_service, vector_service
 
     enc = vector_service.encoder_status() if vector_service.index is not None else {}
-    cfg = _current_decision_config()
     return {
         "status": "ok",
         "redis": cache_service.available,
         "encoder": enc,
-        "decision_config": cfg.model_dump(),
+        "policy_config": _current_policy_config().model_dump(),
         **get_ab_status(),
     }
 
 
-@router.get("/decision-config")
-async def get_decision_config(_: None = Depends(require_push_admin)):
-    path = decision_config_path()
+@router.get("/policy-config")
+async def get_policy_config(_: None = Depends(require_push_admin)):
+    path = policy_config_path()
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Config not found: {path}")
-    content = path.read_text(encoding="utf-8")
-    return {"path": str(path), "content": content}
+    return {"path": str(path), "content": path.read_text(encoding="utf-8")}
 
 
-@router.put("/decision-config")
-async def put_decision_config(
-    request: Request,
-    _: None = Depends(require_push_admin),
-):
+@router.put("/policy-config")
+async def put_policy_config(request: Request, _: None = Depends(require_push_admin)):
     try:
         body = await request.json()
     except Exception as exc:
@@ -80,22 +74,18 @@ async def put_decision_config(
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Body must be a JSON object")
     try:
-        validated = DecisionConfigModel(**body)
+        validated = PolicyConfigModel(**body)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid decision config: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Invalid policy config: {exc}") from exc
 
-    path = decision_config_path()
+    path = policy_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(validated.model_dump(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(validated.model_dump(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _touch_config_mtime()
-    from .main import _current_decision_config
+    from .main import _current_policy_config
 
-    cfg = _current_decision_config()
-    append_audit("decision_config.update", detail={"path": str(path)})
-    return {"ok": True, "decision_config": cfg.model_dump()}
+    append_audit("policy_config.update", detail={"path": str(path)})
+    return {"ok": True, "policy_config": _current_policy_config().model_dump()}
 
 
 @router.get("/profiles")
@@ -105,10 +95,8 @@ async def get_profiles(_: None = Depends(require_push_admin)):
 
 @router.put("/profiles")
 async def put_profiles(body: dict, _: None = Depends(require_push_admin)):
-    if not isinstance(body, dict) or "profiles" not in body:
+    if not isinstance(body, dict) or "profiles" not in body or not isinstance(body["profiles"], dict):
         raise HTTPException(status_code=400, detail="Body must contain 'profiles' object")
-    if not isinstance(body["profiles"], dict):
-        raise HTTPException(status_code=400, detail="'profiles' must be an object")
     save_profiles(body)
     append_audit("profiles.update", detail={"count": len(body["profiles"])})
     return body
@@ -128,10 +116,7 @@ async def get_ab_experiments(_: None = Depends(require_push_admin)):
 
 
 @router.post("/ab-experiments")
-async def post_ab_experiment(
-    body: AbExperimentBody,
-    _: None = Depends(require_push_admin),
-):
+async def post_ab_experiment(body: AbExperimentBody, _: None = Depends(require_push_admin)):
     data = body.model_dump()
     profiles = load_profiles().get("profiles", {})
     for key in ("variant_a", "variant_b"):
@@ -155,20 +140,14 @@ async def delete_ab_experiment(_: None = Depends(require_push_admin)):
 async def list_sessions(_: None = Depends(require_push_admin)):
     sessions_dir = _sessions_dir()
     if not sessions_dir.is_dir():
-        return {"sessions": []}
+        return {"sessions": [], "count": 0}
     sessions = []
     for path in sorted(sessions_dir.glob("*.json")):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             raw = {}
-        sessions.append(
-            {
-                "session_id": path.stem,
-                "path": str(path),
-                "state": raw,
-            }
-        )
+        sessions.append({"session_id": path.stem, "path": str(path), "state": raw})
     return {"sessions": sessions, "count": len(sessions)}
 
 
@@ -186,10 +165,10 @@ async def delete_session(session_id: str, _: None = Depends(require_push_admin))
     return {"ok": True, "session_id": session_id}
 
 
-@router.post("/videos/reload")
-async def reload_videos(_: None = Depends(require_push_admin)):
-    """Reload video metadata + FAISS from /app/data without rebuilding the image."""
-    from .main import cache_service, reload_advisor_from_vectors, vector_service
+@router.post("/items/reload")
+async def reload_items(_: None = Depends(require_push_admin)):
+    """Reload item catalog + index from data/ without rebuilding the image."""
+    from .main import cache_service, reload_handoff_from_vectors, vector_service
 
     try:
         enc = vector_service.reload_data()
@@ -198,7 +177,7 @@ async def reload_videos(_: None = Depends(require_push_admin)):
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    reload_advisor_from_vectors()
+    reload_handoff_from_vectors()
 
     flushed = False
     if cache_service.available:
@@ -208,7 +187,7 @@ async def reload_videos(_: None = Depends(require_push_admin)):
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    append_audit("videos.reload", detail={"encoder": enc, "cache_flushed": flushed})
+    append_audit("items.reload", detail={"encoder": enc, "cache_flushed": flushed})
     return {"ok": True, "encoder": enc, "cache_flushed": flushed}
 
 

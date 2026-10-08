@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_VIDEO_META = "sample_videos.json"
+DEFAULT_VIDEO_META = "catalog.json"
 VIDEO_META_PATH = os.path.join(BASE_DIR, DEFAULT_VIDEO_META)
 EMBEDDINGS_PATH = os.path.join(BASE_DIR, "video_embeddings.npy")
 TOPIC_VECS_PATH = os.path.join(BASE_DIR, "topic_vecs.npy")

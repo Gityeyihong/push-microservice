@@ -1,31 +1,33 @@
+"""Generic request/response schemas for the push microservice."""
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
-from datetime import datetime
 
 
-class PushIntentModel(BaseModel):
+class IntentModel(BaseModel):
     primary_topic: Optional[str] = None
-    intent_query: str = ""
+    query: str = ""
     exclude_topics: List[str] = Field(default_factory=list)
-    is_meta_request: bool = False
-    content_need: Literal["video", "none"] = "none"
+    is_meta: bool = False
+    content_need: Literal["item", "handoff", "none"] = "none"
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
 
 class PushEventModel(BaseModel):
-    type: Literal["video_push", "advisor_push"]
+    type: Literal["item_push", "handoff_push", "event"]
     data: Dict[str, Any]
 
 
-class CandidateVideo(BaseModel):
-    video_id: str
-    type: str = "video"
+class CandidateItem(BaseModel):
+    item_id: str
+    item_type: str = "item"
     similarity: float
     prob_base: float
     title: str
-    cover_url: str
+    media_url: str = ""
     duration_sec: float = 60
-    vod_video_id: Optional[str] = None
+    item_ref: Optional[str] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AWeightsModel(BaseModel):
@@ -36,8 +38,8 @@ class AWeightsModel(BaseModel):
     U: float = 0.18
 
 
-class DecisionConfigModel(BaseModel):
-    version: str = "1"
+class PolicyConfigModel(BaseModel):
+    version: str = "2"
     target_push_rate_per_10: float = 2.5
     min_push_rate_per_10: float = 0.6
     max_push_rate_per_10: float = 2.5
@@ -53,7 +55,7 @@ class DecisionConfigModel(BaseModel):
     f_default_new_user: float = 0.6
     urge_initial: float = 0.5
     urge_delta: float = 0.07
-    urge_active_video_decay: float = 0.7
+    urge_active_item_decay: float = 0.7
     cooldown_ms: int = 90000
     cooldown_ms_max: int = 90000
     state_modulation: Dict[str, float] = Field(
@@ -68,62 +70,54 @@ class DecisionConfigModel(BaseModel):
     recent_push_load_divisor: int = 3
     session_msg_cap: int = 30
     auto_push_min_session_msgs: int = 2
-    auto_video_target_rate: Optional[float] = None
-    auto_video_quota_min_similarity: float = 0.40
-    auto_video_quota_cooldown_msgs: int = 3
-    auto_advisor_target_rate: Optional[float] = None
-    auto_advisor_effective_rate: Optional[float] = None
-    auto_advisor_quota_cooldown_msgs: int = 3
-    auto_advisor_quota_min_session_msgs: int = 2
-    advisor_push_cooldown_ms: int = 300000
-    advisor_session_push_cap: int = 3
-    mentor_a_boost: float = 0.05
-    mentor_cooldown_ms: int = 55000
-    mentor_urge_delta_bonus: float = 0.02
+    auto_item_target_rate: Optional[float] = None
+    auto_item_quota_min_similarity: float = 0.40
+    auto_item_quota_cooldown_msgs: int = 3
+    auto_handoff_target_rate: Optional[float] = None
+    auto_handoff_effective_rate: Optional[float] = None
+    auto_handoff_quota_cooldown_msgs: int = 3
+    auto_handoff_quota_min_session_msgs: int = 2
+    handoff_push_cooldown_ms: int = 300000
+    handoff_session_push_cap: int = 3
 
 
-class EngagementEvent(BaseModel):
-    video_id: str
+class FeedbackEvent(BaseModel):
+    item_id: str
     event: Literal[
         "exposed", "click", "watch_end", "dismiss", "no_click",
         "share", "favorite", "not_interested",
     ]
     watch_duration_sec: float = 0
-    video_duration_sec: float = 60
+    item_duration_sec: float = 60
     session_id: Optional[str] = None
     timestamp: Optional[str] = None
 
 
-class EngagementResponse(BaseModel):
+class FeedbackResponse(BaseModel):
     accepted: bool
     classified_feedback: Optional[Literal["positive", "negative", "strong_negative"]] = None
     reason: Optional[str] = None
 
 
 class PushResponse(BaseModel):
-    candidates: List[CandidateVideo]
-    advisor_suggestion: bool
+    candidates: List[CandidateItem]
+    handoff_suggested: bool
     generated_at: str
-    decision_config: DecisionConfigModel
+    policy_config: PolicyConfigModel
     push_events: List[PushEventModel] = Field(default_factory=list)
     state_summary: Optional[Dict[str, Any]] = None
 
 
 class PushRequest(BaseModel):
-    context: str = Field(..., description="最近对话文本")
-    load_factor: float = Field(0.8, ge=0.0, le=1.0, description="负荷因子")
-    positive_rate: float = Field(0.6, ge=0.0, le=1.0, description="正反馈率")
-    intimacy: float = Field(0.4, ge=0.0, le=1.0, description="亲密度")
-    urge: float = Field(0.7, ge=0.0, le=1.0, description="推送冲动值U")
+    context: str = Field(..., description="Recent conversation text")
+    load_factor: float = Field(0.8, ge=0.0, le=1.0, description="Load factor")
+    positive_rate: float = Field(0.6, ge=0.0, le=1.0, description="Positive feedback rate")
+    intimacy: float = Field(0.4, ge=0.0, le=1.0, description="Intimacy")
+    urge: float = Field(0.7, ge=0.0, le=1.0, description="Urge value")
     trigger_mode: Literal["auto", "active"] = "auto"
-    resource_type: Literal["video", "advisor", "all"] = "video"
+    item_type: Optional[str] = None
     experiment_id: Optional[str] = None
-    risk_alert: bool = Field(False, description="P0: 上游风险监控信号")
-    conversation_state: Literal["INIT", "GATHERING", "DEEPENING", "TAILORING"] = Field("INIT", description="P1: 对话阶段")
-    session_id: Optional[str] = Field(None, description="会话 ID，用于服务端推送状态")
-    interaction_mode: Literal["auto", "mentor", "proxy_chat"] = Field(
-        "auto", description="交互模式（auto/mentor/proxy_chat）"
-    )
-    push_intent: Optional[PushIntentModel] = Field(
-        None, description="上游预分析意图（可选）"
-    )
+    signals: Dict[str, Any] = Field(default_factory=dict, description="Extensible signals (e.g. risk_alert)")
+    state: str = Field("INIT", description="Generic conversation state label")
+    session_id: Optional[str] = Field(None, description="Session id for server-side state")
+    intent: Optional[IntentModel] = Field(None, description="Upstream pre-analyzed intent (optional)")

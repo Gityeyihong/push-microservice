@@ -55,7 +55,7 @@ SERVER_WORKERS = int(os.getenv("SERVER_WORKERS", 4))
 PUSH_USE_MOCK_VECTORS = os.getenv("PUSH_USE_MOCK_VECTORS", "0").strip().lower() in ("1", "true", "yes")
 VECTOR_MANIFEST_PATH = os.path.join(DATA_DIR, "..", "data", "vector_manifest.json")
 
-_push_videos_file = os.getenv("PUSH_VIDEOS", "sample_videos.json").strip() or "sample_videos.json"
+_push_videos_file = os.getenv("PUSH_VIDEOS", "catalog.json").strip() or "catalog.json"
 DATA_ROOT = os.path.join(DATA_DIR, "..", "data")
 EMBEDDINGS_PATH = os.path.join(DATA_ROOT, "video_embeddings.npy")
 TOPIC_VECS_PATH = os.path.join(DATA_ROOT, "topic_vecs.npy")

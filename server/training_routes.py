@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -32,14 +33,20 @@ async def training_status(_: None = Depends(require_push_admin)):
     from selftrain.constants import load_training_config
     from selftrain.events import TrainingEvents
     from selftrain.registry import get_active, list_versions
+    from selftrain.store import create_store
 
     cfg = load_training_config()
     active = get_active()
-    versions = list_versions()
+    store = create_store(cfg)
+    try:
+        funnel = await store.funnel_counts()
+    except Exception:
+        funnel = {}
     return {
         "config": cfg,
         "active": str(active) if active else None,
-        "version_count": len(versions),
+        "version_count": len(list_versions()),
+        "funnel": funnel,
         "recent_events": TrainingEvents().tail(20),
     }
 
@@ -49,10 +56,16 @@ async def training_versions(_: None = Depends(require_push_admin)):
     from selftrain.registry import get_active, list_versions
 
     active = get_active()
-    return {
-        "active": str(active) if active else None,
-        "versions": list_versions(),
-    }
+    return {"active": str(active) if active else None, "versions": list_versions()}
+
+
+@router.get("/funnel")
+async def training_funnel(_: None = Depends(require_push_admin)):
+    from selftrain.constants import load_training_config
+    from selftrain.store import create_store
+
+    store = create_store(load_training_config())
+    return await store.funnel_counts()
 
 
 @router.post("/run")
@@ -68,37 +81,24 @@ async def training_run(body: RunBody, _: None = Depends(require_push_admin)):
 
 @router.post("/build-dataset")
 async def training_build_dataset(_: None = Depends(require_push_admin)):
-    from selftrain.datagen import build_candidates, load_catalog
-    from selftrain.gate import gate_batch
-    from selftrain.reviewer import ExternalReviewer
     from selftrain.constants import load_training_config
+    from selftrain.datagen import build_candidate_rows, load_catalog
+    from selftrain.rewards import load_reward_adapter
+    from selftrain.store import create_store
 
-    catalog = load_catalog()
-    candidates = build_candidates(catalog)
-    gated = await gate_batch(candidates, ExternalReviewer(load_training_config()))
-    return {
-        "catalog": len(catalog),
-        "candidates": len(candidates),
-        "positives": len(gated.positives),
-        "negatives": len(gated.negatives),
-        "corrections": len(gated.corrections),
-        "dropped": len(gated.dropped),
-        "review_unavailable": gated.review_unavailable,
-    }
+    cfg = load_training_config()
+    store = create_store(cfg)
+    reward = load_reward_adapter(cfg)
+    rows, watermark, stats = await build_candidate_rows(store, reward, load_catalog())
+    return {"candidates": len(rows), "new_watermark": watermark, **stats}
 
 
 @router.post("/samples/import")
 async def training_import_sample(body: ImportSampleBody, _: None = Depends(require_push_admin)):
-    import json
-
     from selftrain.constants import training_dir
     from selftrain.reviewer import ManualReviewStore
 
-    sample = {
-        "anchor": body.anchor,
-        "positive": body.positive,
-        "negatives": body.negatives,
-    }
+    sample = {"anchor": body.anchor, "positive": body.positive, "negatives": body.negatives}
     review = ManualReviewStore().import_review(sample, body.approved, body.reason)
 
     imports_path = training_dir() / "imports.jsonl"
@@ -118,6 +118,14 @@ async def training_rollback(_: None = Depends(require_push_admin)):
     return result
 
 
+@router.post("/store/compact")
+async def training_store_compact(_: None = Depends(require_push_admin)):
+    from selftrain.constants import load_training_config
+    from selftrain.store import create_store
+
+    return await create_store(load_training_config()).compact()
+
+
 @router.get("/eval")
 async def training_eval(_: None = Depends(require_push_admin)):
     from selftrain.constants import training_dir
@@ -125,12 +133,5 @@ async def training_eval(_: None = Depends(require_push_admin)):
     runs_dir = Path(training_dir()) / "runs"
     if not runs_dir.is_dir():
         return {"runs": []}
-    runs = []
-    for report in sorted(runs_dir.glob("*/report.md")):
-        runs.append(
-            {
-                "run": report.parent.name,
-                "report": report.read_text(encoding="utf-8"),
-            }
-        )
+    runs = [{"run": r.parent.name, "report": r.read_text(encoding="utf-8")} for r in sorted(runs_dir.glob("*/report.md"))]
     return {"runs": runs[-10:]}

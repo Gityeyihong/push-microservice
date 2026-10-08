@@ -1,36 +1,24 @@
+"""Per-session state for the decision policy (file-backed)."""
+
+from __future__ import annotations
+
 import json
 import os
-import time
-from typing import List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Optional
 
-from .decision_config import load_decision_config
-
-
-@dataclass
-class PushEvent:
-    data: dict
-    type: str = "push"
-
-
-@dataclass
-class VideoPushEvent(PushEvent):
-    type: str = "video_push"
-
-
-@dataclass
-class AdvisorPushEvent(PushEvent):
-    type: str = "advisor_push"
+from .events import HandoffPushEvent, ItemPushEvent, PushEvent  # noqa: F401
+from .config import load_policy_config
 
 
 class StateManager:
-    """Simulates MMKV local storage for the mobile decision engine."""
+    """File-backed session state store (single-node)."""
 
     def __init__(self, state_file: Optional[str] = None):
         self._state_file = state_file or os.path.join(
-            os.path.dirname(__file__), "..", "data", "mobile_state.json"
+            os.path.dirname(__file__), "..", "data", "policy_state.json"
         )
-        _cfg = load_decision_config()
+        _cfg = load_policy_config()
         self._defaults = {
             "urge": _cfg.urge_initial,
             "tau": _cfg.tau_init,
@@ -43,15 +31,14 @@ class StateManager:
             "msg_ts_list": [],
             "cool_down_remain": 0,
             "session_msg_count": 0,
-            "last_advisor_push_ts": 0,
-            "total_advisor_push_count": 0,
-            "auto_video_push_count": 0,
-            "last_auto_video_push_msg": 0,
-            "auto_advisor_push_count": 0,
-            "last_auto_advisor_push_msg": 0,
+            "last_handoff_push_ts": 0,
+            "total_handoff_push_count": 0,
+            "auto_item_push_count": 0,
+            "last_auto_item_push_msg": 0,
+            "auto_handoff_push_count": 0,
+            "last_auto_handoff_push_msg": 0,
         }
         self._state = dict(self._defaults)
-
         if os.path.exists(self._state_file):
             self._load()
         else:
@@ -64,6 +51,7 @@ class StateManager:
             self._state[k] = saved.get(k, v)
 
     def _save(self):
+        os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
         with open(self._state_file, "w", encoding="utf-8") as f:
             json.dump(self._state, f, ensure_ascii=False, indent=2)
 
@@ -75,15 +63,14 @@ class StateManager:
         self._save()
 
     def reset_session(self, *, isolated: bool = False):
-        """重置会话计数与导师配额；isolated=True 时一并清空冷却时间戳（压测/新用户隔离）。"""
         self._state["session_msg_count"] = 0
         self._state["msg_ts_list"] = []
-        self._state["last_advisor_push_ts"] = 0
-        self._state["total_advisor_push_count"] = 0
-        self._state["auto_video_push_count"] = 0
-        self._state["last_auto_video_push_msg"] = 0
-        self._state["auto_advisor_push_count"] = 0
-        self._state["last_auto_advisor_push_msg"] = 0
+        self._state["last_handoff_push_ts"] = 0
+        self._state["total_handoff_push_count"] = 0
+        self._state["auto_item_push_count"] = 0
+        self._state["last_auto_item_push_msg"] = 0
+        self._state["auto_handoff_push_count"] = 0
+        self._state["last_auto_handoff_push_msg"] = 0
         if isolated:
             self._state["last_push_ts"] = 0
             self._state["cool_down_remain"] = 0
@@ -97,8 +84,8 @@ class StateManager:
         self._state["session_msg_count"] += 1
         self._save()
 
-    def add_push_history(self, video_id: str):
-        self._state["push_history"].append(video_id)
+    def add_push_history(self, item_id: str):
+        self._state["push_history"].append(item_id)
         if len(self._state["push_history"]) > 5:
             self._state["push_history"] = self._state["push_history"][-5:]
         self._state["total_exposures"] += 1
@@ -117,8 +104,6 @@ class StateManager:
         if is_positive:
             self._state["positive_feedbacks"] += 1
             self._state["consecutive_negative"] = 0
-        elif is_strong_negative:
-            self._state["consecutive_negative"] += 1
         else:
             self._state["consecutive_negative"] += 1
         self._save()

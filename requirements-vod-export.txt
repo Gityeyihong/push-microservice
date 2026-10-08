@@ -1,3 +1,0 @@
-# 可选：仅运行 scripts/export_aliyun_vod_videos.py 时需要
-aliyun-python-sdk-core>=2.13.0
-aliyun-python-sdk-vod>=2.16.0

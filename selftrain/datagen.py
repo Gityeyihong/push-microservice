@@ -1,20 +1,12 @@
-"""Build contrastive training candidates from collected push/engagement records.
+"""Build contrastive samples incrementally from the training store.
 
-Sample shape:
-    {
-      "anchor": <user intent text>,
-      "positive": <engaged video text>,
-      "negatives": [<rejected video text>, ...],
-      "source": "positive|negative|import",
-      "behavior": "positive|negative",
-      "session_id": "...",
-      "video_id": "v_001",
-      "review": null
-    }
+Only NEW exposures (past the watermark) are processed, so this scales to large
+event volumes without loading everything into memory.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -22,33 +14,22 @@ from pathlib import Path
 from typing import Any
 
 from .constants import PROJECT_ROOT, training_dir
+from .rewards import RewardAdapter
 
 logger = logging.getLogger(__name__)
 
-POSITIVE_FEEDBACK = {"positive"}
-NEGATIVE_FEEDBACK = {"negative", "strong_negative"}
 
-
-def video_text(video: dict) -> str:
+def video_text(item: dict) -> str:
     return (
-        f"标题：{video.get('title', '')}。 "
-        f"文案：{video.get('description', '')}。 "
-        f"简述：{video.get('summary', '')}。 "
-        f"标签：{' '.join(video.get('tags') or [])}"
+        f"Title: {item.get('title', '')}. "
+        f"Description: {item.get('description', '')}. "
+        f"Summary: {item.get('summary', '')}. "
+        f"Tags: {' '.join(item.get('tags') or [])}"
     )
 
 
-def _last_user_message(context: str) -> str:
-    for line in reversed((context or "").strip().splitlines()):
-        stripped = line.strip()
-        for prefix in ("用户:", "用户：", "user:", "User:"):
-            if stripped.startswith(prefix):
-                return stripped[len(prefix):].strip()
-    return ""
-
-
 def _catalog_path(catalog_file: str | None = None) -> Path:
-    name = catalog_file or os.getenv("PUSH_VIDEOS", "sample_videos.json")
+    name = catalog_file or os.getenv("PUSH_VIDEOS", "catalog.json")
     return PROJECT_ROOT / "data" / name
 
 
@@ -62,125 +43,99 @@ def load_catalog(path: str | Path | None = None) -> dict[str, dict]:
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("catalog read failed: %s", exc)
         return {}
-    return {str(v.get("video_id")): v for v in data if v.get("video_id")}
+    return {str(v.get("item_id")): v for v in data if v.get("item_id")}
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return rows
+def dedup_hash(anchor: str, positive_id: str, label: str) -> str:
+    raw = f"{anchor}\u0001{positive_id}\u0001{label}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _imports(base_dir: Path) -> list[dict]:
-    rows = _read_jsonl(base_dir / "imports.jsonl")
-    out = []
-    for row in rows:
-        anchor = str(row.get("anchor", "")).strip()
-        positive = str(row.get("positive", "")).strip()
-        if not anchor or not positive:
-            continue
-        out.append(
-            {
-                "anchor": anchor,
-                "positive": positive,
-                "negatives": [str(n) for n in row.get("negatives", []) if str(n).strip()],
-                "source": "import",
-                "behavior": "positive",
-                "session_id": row.get("session_id"),
-                "video_id": row.get("video_id"),
-                "review": {"status": "approved", "reason": "manual_import", "by": "manual"},
-            }
-        )
-    return out
+def _last_user(context: str) -> str:
+    for line in reversed((context or "").strip().splitlines()):
+        s = line.strip()
+        for prefix in ("用户:", "用户：", "user:", "User:"):
+            if s.startswith(prefix):
+                return s[len(prefix):].strip()
+    return ""
 
 
-def build_candidates(
-    catalog: dict[str, dict] | None = None,
+async def build_candidate_rows(
+    store,
+    reward: RewardAdapter,
+    catalog: dict[str, dict],
     *,
-    base_dir: Path | None = None,
-) -> list[dict]:
-    base = base_dir or training_dir()
-    catalog = catalog if catalog is not None else load_catalog()
+    negatives_per_anchor: int = 8,
+    page_size: int = 5000,
+    max_rows: int = 200000,
+) -> tuple[list[dict], int, dict]:
+    """Return (rows, new_watermark, stats) processing only new exposures."""
+    watermark = await store.get_watermark("push_id")
+    max_id = watermark
+    rows: list[dict] = []
+    stats = {"exposures": 0, "success": 0, "failure": 0, "unknown": 0, "capped": False}
 
-    pushes = _read_jsonl(base / "pushes.jsonl")
-    engagements = _read_jsonl(base / "engagement.jsonl")
+    while len(rows) < max_rows:
+        exposures = await store.get_new_exposures(watermark, page_size)
+        if not exposures:
+            break
+        sessions = list({e["session_id"] for e in exposures})
+        feedback = await store.get_feedback_for_sessions(sessions)
 
-    by_session: dict[str, list[dict]] = {}
-    for eng in engagements:
-        by_session.setdefault(str(eng.get("session_id") or "default"), []).append(eng)
+        for exposure in exposures:
+            max_id = max(max_id, int(exposure["id"]))
+            anchor = (exposure.get("anchor") or "").strip() or _last_user(exposure.get("anchor", ""))
+            events = feedback.get(exposure["session_id"], [])
+            items = exposure.get("items", [])
+            stats["exposures"] += len(items)
 
-    samples: list[dict] = []
-    for push in pushes:
-        session_id = str(push.get("session_id") or "default")
-        context = str(push.get("context", ""))
-        anchor = str(push.get("intent_query") or "").strip() or _last_user_message(context)
-        if not anchor:
-            continue
-        pushed_ids = [str(v) for v in push.get("video_ids", [])]
+            success_items = []
+            failure_ids = []
+            for item in items:
+                outcome = reward.outcome(exposure=item, events=events)
+                if outcome.label == "success":
+                    success_items.append((item, outcome))
+                elif outcome.label == "failure":
+                    failure_ids.append(item["item_id"])
+                    stats["failure"] += 1
+                else:
+                    stats["unknown"] += 1
 
-        positive_ids: list[str] = []
-        negative_ids: list[str] = []
-        for eng in by_session.get(session_id, []):
-            vid = str(eng.get("video_id"))
-            if vid not in pushed_ids:
-                continue
-            cls = eng.get("classified")
-            if cls in POSITIVE_FEEDBACK:
-                positive_ids.append(vid)
-            elif cls in NEGATIVE_FEEDBACK:
-                negative_ids.append(vid)
+            for item, outcome in success_items:
+                pos_id = str(item["item_id"])
+                if pos_id not in catalog:
+                    continue
+                neg_ids = [i for i in failure_ids if i != pos_id][:negatives_per_anchor]
+                negatives = [video_text(catalog[i]) for i in neg_ids if i in catalog]
+                rows.append(
+                    {
+                        "anchor": anchor,
+                        "positive_id": pos_id,
+                        "positive": video_text(catalog[pos_id]),
+                        "negatives": negatives,
+                        "reward": outcome.reward,
+                        "propensity": outcome.propensity,
+                        "label": "success",
+                        "review_status": "pending",
+                        "dedup_hash": dedup_hash(anchor, pos_id, "success"),
+                    }
+                )
+                stats["success"] += 1
+                if len(rows) >= max_rows:
+                    stats["capped"] = True
+                    break
 
-        negatives_text = [video_text(catalog[v]) for v in negative_ids if v in catalog]
+        watermark = max_id
+        if stats["capped"] or len(exposures) < page_size:
+            break
 
-        for vid in positive_ids:
-            if vid not in catalog:
-                continue
-            samples.append(
-                {
-                    "anchor": anchor,
-                    "positive": video_text(catalog[vid]),
-                    "negatives": negatives_text,
-                    "source": "positive",
-                    "behavior": "positive",
-                    "session_id": session_id,
-                    "video_id": vid,
-                    "review": None,
-                }
-            )
-
-        for vid in negative_ids:
-            if vid not in catalog:
-                continue
-            samples.append(
-                {
-                    "anchor": anchor,
-                    "positive": video_text(catalog[vid]),
-                    "negatives": [],
-                    "source": "negative",
-                    "behavior": "negative",
-                    "session_id": session_id,
-                    "video_id": vid,
-                    "review": None,
-                }
-            )
-
-    samples.extend(_imports(base))
-    return samples
+    return rows, max_id, stats
 
 
-def save_pairs(samples: list[dict], path: Path | None = None) -> Path:
+def save_pairs(rows: list[dict], path: Path | None = None) -> Path:
     out = path or (training_dir() / "pairs.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a", encoding="utf-8") as f:
-        for sample in samples:
-            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return out

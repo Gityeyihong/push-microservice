@@ -21,13 +21,16 @@ data/vector_manifest.json
 # Runtime state / logs
 data/sessions/*.json
 !data/sessions/.gitkeep
-data/mobile_state.json
+data/policy_state.json
 data/admin_audit.jsonl
 logs/
 reports/*.jsonl
 
 # Training artifacts
 data/training/*.jsonl
+data/training/*.db
+data/training/*.db-wal
+data/training/*.db-shm
 !data/training/.gitkeep
 data/training/runs/
 models/versions/

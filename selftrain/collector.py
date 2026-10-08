@@ -1,84 +1,100 @@
-"""Capture push/engagement records used to build training samples.
+"""Capture push/feedback records into the training store.
 
-Records are append-only JSONL under data/training/. Collection is cheap and can
-be toggled via TRAINING_ENABLED; disabled by default so serving stays unaffected.
+Collection is cheap and toggled via TRAINING_ENABLED (disabled by default so
+serving is unaffected). Uses Postgres/Redis when configured, SQLite otherwise.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from datetime import datetime, timezone
-from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
-from .constants import training_dir
+from .constants import load_training_config
+
+if TYPE_CHECKING:
+    from .store.base import TrainingStore
 
 logger = logging.getLogger(__name__)
 
 
-def _enabled() -> bool:
-    return os.getenv("TRAINING_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+def _label_from_classified(classified: Optional[str]) -> str:
+    if classified == "positive":
+        return "success"
+    if classified in ("negative", "strong_negative"):
+        return "failure"
+    return "unknown"
 
 
 class TrainingCollector:
-    def __init__(self, enabled: bool | None = None, base_dir: Path | None = None):
-        self.enabled = _enabled() if enabled is None else enabled
-        self.base_dir = base_dir or training_dir()
+    def __init__(self, enabled: bool | None = None, store: "TrainingStore | None" = None, config: dict | None = None):
+        self.config = config or load_training_config()
+        if enabled is None:
+            enabled = os.getenv("TRAINING_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+        self.enabled = bool(enabled) or bool(self.config.get("enabled"))
+        self._store = store
 
-    def _append(self, name: str, row: dict) -> None:
-        if not self.enabled:
-            return
-        try:
-            self.base_dir.mkdir(parents=True, exist_ok=True)
-            path = self.base_dir / name
-            with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        except OSError as exc:
-            logger.warning("collector append failed: %s", exc)
+    def _get_store(self) -> "TrainingStore":
+        if self._store is None:
+            from .store import create_store
 
-    def record_push(
+            self._store = create_store(self.config)
+        return self._store
+
+    async def record_push(
         self,
         *,
         session_id: str | None,
         context: str,
-        video_ids: list[str],
+        item_ids: list[str],
         intent_query: str = "",
-        interaction_mode: str = "auto",
     ) -> None:
-        if not video_ids:
+        if not self.enabled or not item_ids:
             return
-        self._append(
-            "pushes.jsonl",
-            {
-                "at": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id or "default",
-                "context": context,
-                "intent_query": intent_query,
-                "video_ids": list(video_ids),
-                "interaction_mode": interaction_mode,
-            },
-        )
+        anchor = (intent_query or "").strip() or _last_user(context)
+        items = [{"item_id": iid, "shown": True} for iid in item_ids]
+        try:
+            await self._get_store().record_push(
+                session_id=session_id or "default", anchor=anchor, items=items
+            )
+        except Exception as exc:
+            logger.warning("record_push failed: %s", exc)
 
-    def record_engagement(
+    async def record_feedback(
         self,
         *,
         session_id: str | None,
-        video_id: str,
+        item_id: str,
         event: str,
         watch_duration_sec: float = 0.0,
-        video_duration_sec: float = 60.0,
+        item_duration_sec: float = 60.0,
         classified: str | None = None,
     ) -> None:
-        self._append(
-            "engagement.jsonl",
-            {
-                "at": datetime.now(timezone.utc).isoformat(),
-                "session_id": session_id or "default",
-                "video_id": video_id,
-                "event": event,
-                "watch_duration_sec": watch_duration_sec,
-                "video_duration_sec": video_duration_sec,
-                "classified": classified,
-            },
-        )
+        if not self.enabled:
+            return
+        ratio = watch_duration_sec / item_duration_sec if item_duration_sec else 0.0
+        try:
+            await self._get_store().record_feedback(
+                session_id=session_id or "default",
+                item_id=item_id,
+                event=event,
+                watch_ratio=round(ratio, 4),
+                reward=0.0,
+                label=_label_from_classified(classified),
+                propensity=1.0,
+            )
+        except Exception as exc:
+            logger.warning("record_feedback failed: %s", exc)
+
+    async def close(self) -> None:
+        if self._store is not None:
+            await self._store.close()
+
+
+def _last_user(context: str) -> str:
+    for line in reversed((context or "").strip().splitlines()):
+        s = line.strip()
+        for prefix in ("用户:", "用户：", "user:", "User:"):
+            if s.startswith(prefix):
+                return s[len(prefix):].strip()
+    return (context or "").strip()[:200]

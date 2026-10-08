@@ -1,4 +1,4 @@
-"""Per-session StateManager for server-side push decisions."""
+"""Per-session StateManager for the decision policy."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 import re
 from functools import lru_cache
 
-from mobile.state_manager import StateManager
+from policy.state import StateManager
 
 _SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "sessions")
 

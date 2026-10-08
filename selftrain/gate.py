@@ -1,6 +1,6 @@
 """Sample gating: positive | correction | negative | drop.
 
-A `positive` behavior sample becomes training-positive ONLY when an external
+A success-labeled sample becomes a training positive ONLY when an external
 reviewer approves it. Reviewer unavailability => drop (never self-approve).
 """
 
@@ -31,24 +31,34 @@ class GateResult:
     rejected: int = 0
 
 
+def _sample_label(sample: dict) -> str:
+    label = sample.get("label")
+    if label in ("success", "failure", "unknown"):
+        return label
+    behavior = sample.get("behavior")
+    if behavior == "positive":
+        return "success"
+    if behavior == "negative":
+        return "failure"
+    return "unknown"
+
+
 def _decision_from_sample(sample: dict) -> ReviewDecision | None:
     review = sample.get("review")
     if isinstance(review, dict) and review.get("status") in (STATUS_APPROVED, STATUS_REJECTED):
-        return ReviewDecision(
-            status=review["status"],
-            reason=str(review.get("reason", "")),
-            by=str(review.get("by", "manual")),
-        )
+        return ReviewDecision(status=review["status"], reason=str(review.get("reason", "")), by=str(review.get("by", "manual")))
+    status = sample.get("review_status")
+    if status in (STATUS_APPROVED, STATUS_REJECTED):
+        return ReviewDecision(status=status, reason="review_status", by="manual")
     return None
 
 
 async def classify_sample(sample: dict, reviewer: ExternalReviewer | None = None) -> GateDecision:
-    behavior = sample.get("behavior")
-    if behavior == "negative":
-        return GateDecision("negative", "behavior_negative")
-
-    if behavior != "positive":
-        return GateDecision("drop", f"unknown_behavior:{behavior}")
+    label = _sample_label(sample)
+    if label == "failure":
+        return GateDecision("negative", "behavior_failure")
+    if label != "success":
+        return GateDecision("drop", f"unknown_label:{label}")
 
     pre = _decision_from_sample(sample)
     if pre is not None:
@@ -65,15 +75,12 @@ async def classify_sample(sample: dict, reviewer: ExternalReviewer | None = None
     return GateDecision("drop", decision.reason or "review_unavailable", decision)
 
 
-async def gate_batch(
-    samples: list[dict], reviewer: ExternalReviewer | None = None
-) -> GateResult:
+async def gate_batch(samples: list[dict], reviewer: ExternalReviewer | None = None) -> GateResult:
     result = GateResult()
     for sample in samples:
         decision = await classify_sample(sample, reviewer)
         if decision.label == "positive":
-            sample = {**sample, "review": _review_dict(decision.review)}
-            result.positives.append(sample)
+            result.positives.append({**sample, "review": _review_dict(decision.review)})
         elif decision.label == "negative":
             result.negatives.append(sample)
         elif decision.label == "correction":

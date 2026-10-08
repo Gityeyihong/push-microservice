@@ -1,0 +1,108 @@
+{
+  "item_request": {
+    "keywords": [
+      "recommend", "suggest", "show me", "give me", "any course", "any video",
+      "any tutorial", "tutorial", "guide", "lesson", "resource", "material",
+      "learn", "explain", "how to"
+    ],
+    "topics": ["video", "course", "tutorial", "guide", "lesson", "resource", "article", "docs"],
+    "verbs": ["want", "need", "recommend", "suggest", "show", "find", "learn", "teach me", "any"],
+    "short_triggers": ["video", "course", "tutorial", "docs", "guide"]
+  },
+  "handoff_request": {
+    "keywords": [
+      "talk to a human", "human agent", "real person", "contact support",
+      "reach an agent", "live support", "customer service", "transfer me",
+      "agent please", "speak to someone", "human help"
+    ],
+    "topics": ["agent", "human", "person", "support", "specialist", "representative"],
+    "verbs": ["talk", "contact", "reach", "transfer", "connect", "speak", "call", "need", "want"],
+    "short_triggers": ["agent", "human", "support", "representative"],
+    "service_markers": [
+      "human agent", "live support", "customer service", "real person",
+      "talk to a human", "contact support"
+    ],
+    "normalizations": {}
+  },
+  "urgent_keywords": ["urgent", "emergency", "asap", "critical", "immediately"],
+  "meta_request_keywords": [
+    "recommend", "suggest", "show me", "give me", "tutorial", "guide",
+    "lesson", "resource", "material", "article", "docs", "learn", "explain"
+  ],
+  "default_exclusions": [],
+  "intent_rules": [
+    {
+      "name": "getting_started",
+      "user_kws": ["get started", "getting started", "beginner", "new user", "onboard", "setup", "install", "sign up"],
+      "item_kws": ["getting started", "beginner", "setup", "install", "onboarding"],
+      "tag_boost": ["getting_started", "onboarding", "tutorials"],
+      "weight": 1.2
+    },
+    {
+      "name": "account",
+      "user_kws": ["account", "login", "log in", "password", "reset password", "profile", "sign in"],
+      "item_kws": ["account", "login", "password", "profile", "sign in"],
+      "tag_boost": ["account", "security"],
+      "weight": 1.1
+    },
+    {
+      "name": "billing",
+      "user_kws": ["billing", "invoice", "payment", "refund", "charge", "subscription", "plan", "pricing"],
+      "item_kws": ["billing", "invoice", "payment", "refund", "subscription", "plan"],
+      "tag_boost": ["billing"],
+      "weight": 1.1
+    },
+    {
+      "name": "troubleshooting",
+      "user_kws": ["error", "fail", "failed", "issue", "bug", "crash", "not working", "broken", "stuck"],
+      "item_kws": ["troubleshooting", "error", "fix", "debug", "issue", "resolve"],
+      "tag_boost": ["troubleshooting", "faq"],
+      "weight": 1.0
+    },
+    {
+      "name": "integrations",
+      "user_kws": ["integration", "integrate", "api", "webhook", "connect", "plugin", "sdk"],
+      "item_kws": ["integration", "api", "webhook", "connect", "sdk", "plugin"],
+      "tag_boost": ["integrations"],
+      "weight": 1.0
+    },
+    {
+      "name": "security",
+      "user_kws": ["security", "secure", "permission", "role", "access", "auth", "token", "encrypt"],
+      "item_kws": ["security", "permission", "access", "authentication", "encryption"],
+      "tag_boost": ["security"],
+      "weight": 1.0
+    },
+    {
+      "name": "performance",
+      "user_kws": ["performance", "slow", "latency", "speed", "optimize", "throughput", "scale"],
+      "item_kws": ["performance", "latency", "optimize", "throughput", "scaling", "cache"],
+      "tag_boost": ["performance", "best_practices"],
+      "weight": 0.9
+    },
+    {
+      "name": "best_practices",
+      "user_kws": ["best practice", "best practices", "recommended", "pattern", "convention", "guideline"],
+      "item_kws": ["best practice", "pattern", "convention", "guideline", "recommended"],
+      "tag_boost": ["best_practices"],
+      "weight": 0.9
+    },
+    {
+      "name": "release_notes",
+      "user_kws": ["release", "changelog", "what's new", "whats new", "version", "update"],
+      "item_kws": ["release", "changelog", "version", "update", "what's new"],
+      "tag_boost": ["release_notes"],
+      "weight": 0.9
+    }
+  ],
+  "exclusion_rules": [
+    {
+      "name": "off_topic_penalty",
+      "user_kws": ["getting started", "beginner", "new user", "onboard", "setup"],
+      "item_kws": ["billing", "invoice", "refund", "release", "changelog"],
+      "penalty": 0.3
+    }
+  ],
+  "sensitive_topics": [],
+  "helpless_keywords": ["still not working", "nothing works", "i give up", "help me please"]
+}

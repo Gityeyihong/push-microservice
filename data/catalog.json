@@ -1,0 +1,379 @@
+[
+  {
+    "item_id": "i_001",
+    "item_type": "article",
+    "title": "Getting Started: Overview",
+    "description": "A short overview of the platform and the first steps to get up and running.",
+    "summary": "Platform overview and first steps",
+    "tags": [
+      "getting_started",
+      "onboarding"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_001.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_002",
+    "item_type": "video",
+    "title": "Getting Started: Your First Setup",
+    "description": "Walk through creating an account and completing the initial setup checklist.",
+    "summary": "Initial setup walkthrough",
+    "tags": [
+      "getting_started",
+      "tutorials"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_002.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_003",
+    "item_type": "article",
+    "title": "Beginner FAQ",
+    "description": "Answers to the most common questions from new users.",
+    "summary": "Common beginner questions",
+    "tags": [
+      "getting_started",
+      "faq"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_003.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_004",
+    "item_type": "article",
+    "title": "Managing Your Account",
+    "description": "Update profile details, email, and preferences in the account settings.",
+    "summary": "Profile and preferences",
+    "tags": [
+      "account"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_004.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_005",
+    "item_type": "video",
+    "title": "Reset Your Password",
+    "description": "Step-by-step guide to resetting a forgotten password securely.",
+    "summary": "Password reset steps",
+    "tags": [
+      "account",
+      "security"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_005.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_006",
+    "item_type": "article",
+    "title": "Understanding Your Invoice",
+    "description": "How billing cycles, invoices, and payment methods work.",
+    "summary": "Billing and invoices explained",
+    "tags": [
+      "billing"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_006.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_007",
+    "item_type": "article",
+    "title": "Refunds and Cancellations",
+    "description": "How to request a refund and cancel or change your subscription plan.",
+    "summary": "Refund and cancellation policy",
+    "tags": [
+      "billing"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_007.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_008",
+    "item_type": "article",
+    "title": "Troubleshooting Common Errors",
+    "description": "Diagnose and fix the most frequent error messages and failures.",
+    "summary": "Fix common errors",
+    "tags": [
+      "troubleshooting"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_008.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_009",
+    "item_type": "video",
+    "title": "Debugging Failed Requests",
+    "description": "Learn how to read error responses and debug failed requests quickly.",
+    "summary": "Debug failed requests",
+    "tags": [
+      "troubleshooting",
+      "integrations"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_009.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_010",
+    "item_type": "article",
+    "title": "When Something Is Not Working",
+    "description": "A checklist to isolate issues before contacting support.",
+    "summary": "Isolation checklist",
+    "tags": [
+      "troubleshooting",
+      "faq"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_010.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_011",
+    "item_type": "article",
+    "title": "Integrations Overview",
+    "description": "Connect external services and automate workflows with integrations.",
+    "summary": "Connect external services",
+    "tags": [
+      "integrations"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_011.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_012",
+    "item_type": "article",
+    "title": "Using the REST API",
+    "description": "Authenticate and call the REST API with practical examples.",
+    "summary": "REST API usage guide",
+    "tags": [
+      "integrations",
+      "security"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_012.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_013",
+    "item_type": "video",
+    "title": "Webhooks in Practice",
+    "description": "Set up webhooks to receive real-time events from the platform.",
+    "summary": "Webhook setup",
+    "tags": [
+      "integrations",
+      "tutorials"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_013.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_014",
+    "item_type": "article",
+    "title": "Security Best Practices",
+    "description": "Protect your account and data with recommended security settings.",
+    "summary": "Security recommendations",
+    "tags": [
+      "security",
+      "best_practices"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_014.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_015",
+    "item_type": "article",
+    "title": "Roles and Permissions",
+    "description": "Manage team access with roles, scopes, and permission boundaries.",
+    "summary": "Access control guide",
+    "tags": [
+      "security"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_015.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_016",
+    "item_type": "article",
+    "title": "Improving Performance",
+    "description": "Tune configuration and caching to reduce latency.",
+    "summary": "Latency and caching tips",
+    "tags": [
+      "performance",
+      "best_practices"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_016.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_017",
+    "item_type": "article",
+    "title": "Scaling Your Usage",
+    "description": "Strategies for scaling throughput as your usage grows.",
+    "summary": "Scaling strategies",
+    "tags": [
+      "performance"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_017.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_018",
+    "item_type": "article",
+    "title": "Recommended Patterns",
+    "description": "Proven patterns and conventions for reliable implementations.",
+    "summary": "Recommended patterns",
+    "tags": [
+      "best_practices"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_018.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_019",
+    "item_type": "article",
+    "title": "Naming and Structure Conventions",
+    "description": "Consistent naming and project structure for maintainability.",
+    "summary": "Conventions guide",
+    "tags": [
+      "best_practices"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_019.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_020",
+    "item_type": "video",
+    "title": "Common Anti-Patterns",
+    "description": "Avoid these frequently seen mistakes in production setups.",
+    "summary": "Anti-patterns to avoid",
+    "tags": [
+      "best_practices",
+      "faq"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_020.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_021",
+    "item_type": "article",
+    "title": "Frequently Asked Questions",
+    "description": "Answers to the most frequently asked product and account questions.",
+    "summary": "Top FAQs",
+    "tags": [
+      "faq"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_021.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_022",
+    "item_type": "article",
+    "title": "Pricing FAQ",
+    "description": "How pricing, plans, and usage limits are calculated.",
+    "summary": "Pricing questions",
+    "tags": [
+      "faq",
+      "billing"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_022.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_023",
+    "item_type": "article",
+    "title": "Data and Privacy FAQ",
+    "description": "How data is stored, exported, and deleted.",
+    "summary": "Data and privacy answers",
+    "tags": [
+      "faq",
+      "security"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_023.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_024",
+    "item_type": "article",
+    "title": "Onboarding Checklist",
+    "description": "A step-by-step checklist to onboard a new team smoothly.",
+    "summary": "New team checklist",
+    "tags": [
+      "onboarding",
+      "getting_started"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_024.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_025",
+    "item_type": "video",
+    "title": "Onboarding Tour",
+    "description": "A guided tour of the main areas of the product.",
+    "summary": "Guided product tour",
+    "tags": [
+      "onboarding",
+      "tutorials"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_025.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_026",
+    "item_type": "video",
+    "title": "Tutorial: Build Your First Workflow",
+    "description": "Hands-on tutorial building a simple end-to-end workflow.",
+    "summary": "First workflow tutorial",
+    "tags": [
+      "tutorials"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_026.webp",
+    "duration_sec": 240
+  },
+  {
+    "item_id": "i_027",
+    "item_type": "article",
+    "title": "Tutorial: Automate a Task",
+    "description": "Automate a repetitive task with triggers and actions.",
+    "summary": "Task automation tutorial",
+    "tags": [
+      "tutorials",
+      "integrations"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_027.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_028",
+    "item_type": "article",
+    "title": "Tutorial: Reporting Basics",
+    "description": "Create your first report and schedule it to run regularly.",
+    "summary": "Reporting tutorial",
+    "tags": [
+      "tutorials",
+      "best_practices"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_028.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_029",
+    "item_type": "article",
+    "title": "Release Notes: Latest Version",
+    "description": "Highlights and fixes included in the latest release.",
+    "summary": "Latest release highlights",
+    "tags": [
+      "release_notes"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_029.webp",
+    "duration_sec": 60
+  },
+  {
+    "item_id": "i_030",
+    "item_type": "article",
+    "title": "Changelog Archive",
+    "description": "A complete list of changes across previous versions.",
+    "summary": "Historical changelog",
+    "tags": [
+      "release_notes"
+    ],
+    "media_url": "https://cdn.example.com/thumbs/i_030.webp",
+    "duration_sec": 60
+  }
+]

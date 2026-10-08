@@ -1,6 +1,14 @@
 # 自训练（selftrain）依赖；仅训练主机需要，serving 镜像不必安装。
 # 基础 serving 依赖见 requirements.txt（需先安装）。
 sentence-transformers>=2.2.0
-datasets>=2.18.0
-accelerate>=0.27.0
 torch>=2.0.0
+accelerate>=0.27.0
+
+# 训练数据存储（SQLite 回退 + Postgres）
+SQLAlchemy>=2.0
+aiosqlite>=0.19
+asyncpg>=0.29
+
+# 可选：大规模分片/列存
+# datasets>=2.18.0
+# pyarrow>=14.0.0

@@ -110,19 +110,40 @@ class TrainingSafety:
         return kept
 
     def _count_unique(self, samples: list[dict], embedder: Callable[[str], list[float]]) -> int:
+        import numpy as np
+
         embeddings = []
         for sample in samples:
-            vec = embedder(sample.get("positive", ""))
+            vec = embedder(sample.get("anchor", "") + " " + sample.get("positive", ""))
             if vec:
                 embeddings.append(vec)
         if len(embeddings) < 2:
             return len(embeddings)
-        unique = 0
-        for i, emb in enumerate(embeddings):
-            others = [e for j, e in enumerate(embeddings) if j != i]
-            if not others or max(cosine(emb, other) for other in others) <= self.max_sim:
-                unique += 1
-        return unique
+        mat = np.asarray(embeddings, dtype=np.float32)
+        mat = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
+        try:
+            import faiss
+
+            index = faiss.IndexFlatIP(mat.shape[1])
+            index.add(mat)
+            sims, idx = index.search(mat, 2)
+            unique = 0
+            for i in range(len(embeddings)):
+                neighbour_sim = 0.0
+                for score, j in zip(sims[i], idx[i]):
+                    if j != i:
+                        neighbour_sim = float(score)
+                        break
+                if neighbour_sim <= self.max_sim:
+                    unique += 1
+            return unique
+        except Exception:
+            unique = 0
+            for i, emb in enumerate(embeddings):
+                others = [e for j, e in enumerate(embeddings) if j != i]
+                if not others or max(cosine(emb, other) for other in others) <= self.max_sim:
+                    unique += 1
+            return unique
 
     def commit_adapter(self, *, new_path: str | Path, heldout_before: float, heldout_after: float) -> dict:
         new_path = Path(new_path)
