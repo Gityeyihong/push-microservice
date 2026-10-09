@@ -79,20 +79,37 @@ def _session_variant(session_id: str, split_b_percent: int) -> str:
     return "b" if bucket < max(0, min(split_b_percent, 100)) else "a"
 
 
-def resolve_config_for_session(session_id: str | None = None) -> dict:
-    base = load_policy_config().to_dict()
-    exp = load_ab_experiment()
-    if not exp.get("active"):
-        return base
-    profiles = load_profiles().get("profiles", {})
-    variant = _session_variant(session_id or "default", int(exp.get("split_b_percent", 50)))
-    profile_name = exp.get("variant_b") if variant == "b" else exp.get("variant_a")
+def _overlay_profile(base: dict, profiles: dict, profile_name: str | None) -> dict | None:
     if not profile_name:
-        return base
+        return None
     overlay = profiles.get(profile_name)
     if not isinstance(overlay, dict):
-        return base
+        return None
     return {**base, **overlay}
+
+
+def resolve_config_for_session(session_id: str | None = None, experiment_id: str | None = None) -> dict:
+    base = load_policy_config().to_dict()
+    profiles = load_profiles().get("profiles", {})
+    chosen = (experiment_id or "").strip()
+    exp = load_ab_experiment()
+    if chosen:
+        if chosen in profiles:
+            return _overlay_profile(base, profiles, chosen) or base
+        if exp.get("active") and chosen == str(exp.get("name") or ""):
+            pass
+        elif exp.get("active") and chosen in (exp.get("variant_a"), exp.get("variant_b")):
+            forced = _overlay_profile(base, profiles, chosen)
+            if forced is None:
+                raise ValueError(f"unknown experiment_id: {chosen}")
+            return forced
+        else:
+            raise ValueError(f"unknown experiment_id: {chosen}")
+    if not exp.get("active"):
+        return base
+    variant = _session_variant(session_id or "default", int(exp.get("split_b_percent", 50)))
+    profile_name = exp.get("variant_b") if variant == "b" else exp.get("variant_a")
+    return _overlay_profile(base, profiles, profile_name) or base
 
 
 def get_ab_status() -> dict:

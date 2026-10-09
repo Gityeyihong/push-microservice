@@ -1,6 +1,8 @@
+import hashlib
 import json
 import logging
 import os
+import threading
 from typing import List, Dict, Any, Tuple, Optional
 
 import numpy as np
@@ -8,12 +10,15 @@ import faiss
 
 from .config import (
     MODEL_NAME, VECTOR_DIM,
-    FAISS_TOPK, MMR_LAMBDA, MMR_RESULT_N,
+    FAISS_TOPK, FAISS_EF_SEARCH, MMR_LAMBDA, MMR_RESULT_N,
     CONV_KERNEL,
     TOPIC_SOFTMAX_TEMP, SERVICE_SOFTMAX_TEMP,
     SIMILARITY_TEXT_WEIGHT, SIMILARITY_TOPIC_WEIGHT,
-    EMBEDDINGS_PATH, TOPIC_VECS_PATH, TOPIC_VIDEO_VECS_PATH,
-    FAISS_INDEX_PATH, VIDEO_META_PATH,
+    TOPIC_VECS_PATH,
+    FAISS_INDEX_PATH,
+    catalog_path,
+    embeddings_path,
+    item_topic_vecs_path,
 )
 from .config import PUSH_USE_MOCK_VECTORS, VECTOR_MANIFEST_PATH
 from .embedding_model import load_sentence_transformer, resolve_model_path, model_source_label
@@ -32,22 +37,34 @@ from data.topics import HELP_TOPIC_TEXT
 logger = logging.getLogger(__name__)
 
 
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _mock_vector(text: str, dim: int, seed: int) -> np.ndarray:
+    digest = hashlib.sha256(f"{seed}:{text}".encode("utf-8")).digest()
+    rng = np.random.RandomState(int.from_bytes(digest[:4], "little"))
+    return rng.randn(dim).astype(np.float32)
+
+
 class MockEncoder:
-    """Deterministic random encoder matching data/generate_data.py MockEncoder."""
+    """Text-stable random encoder. The same string always maps to the same vector."""
 
     def __init__(self, dim: int = VECTOR_DIM, seed: int = 42):
         self.dim = dim
-        self.rng = np.random.RandomState(seed)
+        self.seed = seed
 
     def encode(self, texts, normalize_embeddings=True):
         if isinstance(texts, str):
             texts = [texts]
-        n = len(texts)
-        vecs = self.rng.randn(n, self.dim).astype(np.float32)
+        vecs = np.stack([_mock_vector(text, self.dim, self.seed) for text in texts])
         if normalize_embeddings:
-            norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8
-            vecs = vecs / norms
-        return vecs
+            vecs = vecs / (np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-8)
+        return vecs.astype(np.float32)
 
 
 class VectorService:
@@ -63,6 +80,8 @@ class VectorService:
         self._vector_manifest: dict = {}
         self._model_path = ""
         self._model_source = ""
+        self._loaded_stamp: tuple = ()
+        self._reload_lock = threading.Lock()
 
     def load(self):
         if not self._data_files_exist():
@@ -87,15 +106,21 @@ class VectorService:
     def _data_files_exist(self) -> bool:
         return all(
             os.path.exists(p)
-            for p in [EMBEDDINGS_PATH, TOPIC_VECS_PATH, TOPIC_VIDEO_VECS_PATH, FAISS_INDEX_PATH, VIDEO_META_PATH]
+            for p in [
+                embeddings_path(),
+                TOPIC_VECS_PATH,
+                item_topic_vecs_path(),
+                FAISS_INDEX_PATH,
+                catalog_path(),
+            ]
         )
 
     def _load_data(self):
-        self.item_embeddings = np.load(EMBEDDINGS_PATH)
+        self.item_embeddings = np.load(embeddings_path())
         self.topic_vectors = np.load(TOPIC_VECS_PATH)
-        self.item_topic_vecs = np.load(TOPIC_VIDEO_VECS_PATH)
+        self.item_topic_vecs = np.load(item_topic_vecs_path())
         self.index = faiss.read_index(FAISS_INDEX_PATH)
-        with open(VIDEO_META_PATH, "r", encoding="utf-8") as f:
+        with open(catalog_path(), "r", encoding="utf-8") as f:
             self.item_metadata = json.load(f)
         logger.info(
             "Loaded %d items, %d topics, index size=%d",
@@ -126,6 +151,42 @@ class VectorService:
             raise RuntimeError(
                 f"Embedding rows ({len(self.item_embeddings)}) != metadata ({len(self.item_metadata)})."
             )
+        if self.index is not None and int(self.index.ntotal) != len(self.item_metadata):
+            raise RuntimeError(
+                f"Index rows ({int(self.index.ntotal)}) != metadata ({len(self.item_metadata)})."
+            )
+        expected_hash = str(self._vector_manifest.get("catalog_sha256") or "")
+        if expected_hash:
+            actual_hash = _sha256_file(catalog_path())
+            if actual_hash != expected_hash:
+                raise RuntimeError("Catalog content does not match the vector manifest.")
+        self._loaded_stamp = self._source_stamp()
+
+    def _source_stamp(self) -> tuple:
+        stamps = []
+        for path in (
+            embeddings_path(),
+            TOPIC_VECS_PATH,
+            item_topic_vecs_path(),
+            FAISS_INDEX_PATH,
+            catalog_path(),
+            VECTOR_MANIFEST_PATH,
+        ):
+            try:
+                stamps.append((path, os.path.getmtime(path), os.path.getsize(path)))
+            except OSError:
+                stamps.append((path, None, None))
+        return tuple(stamps)
+
+    def maybe_reload(self) -> None:
+        if self.index is None or not self._data_files_exist():
+            return
+        if self._source_stamp() == self._loaded_stamp:
+            return
+        with self._reload_lock:
+            if self._source_stamp() == self._loaded_stamp:
+                return
+            self.reload_data()
 
     def _load_encoder(self):
         if PUSH_USE_MOCK_VECTORS:
@@ -164,15 +225,37 @@ class VectorService:
         similarities = np.dot(topic_norms, ctx_vec)
         return self._softmax(similarities / TOPIC_SOFTMAX_TEMP)
 
+    def _prepare_hnsw(self) -> None:
+        hnsw = getattr(self.index, "hnsw", None)
+        if hnsw is None:
+            return
+        needed = max(int(FAISS_EF_SEARCH), int(FAISS_TOPK))
+        if int(hnsw.efSearch) < needed:
+            hnsw.efSearch = needed
+
+    def _as_similarity(self, dist: float) -> float:
+        """IndexHNSWFlat returns squared L2. Unit vectors: cosine = 1 - d/2."""
+        metric = int(getattr(self.index, "metric_type", faiss.METRIC_L2))
+        if metric == int(faiss.METRIC_INNER_PRODUCT):
+            score = float(dist)
+        else:
+            score = 1.0 - float(dist) / 2.0
+        if score > 1.0:
+            return 1.0
+        if score < -1.0:
+            return -1.0
+        return score
+
     def search_and_score(self, ctx_vec: np.ndarray, topic_weights: np.ndarray) -> List[Dict[str, Any]]:
         ctx_vec = ctx_vec.reshape(1, -1).astype(np.float32)
+        self._prepare_hnsw()
         distances, indices = self.index.search(ctx_vec, FAISS_TOPK)
         distances, indices = distances[0], indices[0]
         candidates = []
         for dist, idx in zip(distances, indices):
             if idx < 0 or idx >= len(self.item_metadata):
                 continue
-            s_text = float(dist)
+            s_text = self._as_similarity(dist)
             t_item = self.item_topic_vecs[idx]
             match_topic = float(np.dot(topic_weights, t_item))
             s_final = SIMILARITY_TEXT_WEIGHT * s_text + SIMILARITY_TOPIC_WEIGHT * match_topic

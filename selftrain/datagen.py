@@ -19,17 +19,29 @@ from .rewards import RewardAdapter
 logger = logging.getLogger(__name__)
 
 
-def video_text(item: dict) -> str:
+def item_text(item: dict) -> str:
+    tags = item.get("tags") or []
+    if isinstance(tags, str):
+        tags = [tags]
     return (
-        f"Title: {item.get('title', '')}. "
-        f"Description: {item.get('description', '')}. "
-        f"Summary: {item.get('summary', '')}. "
-        f"Tags: {' '.join(item.get('tags') or [])}"
+        f"title: {item.get('title', '')}. "
+        f"description: {item.get('description', '')}. "
+        f"summary: {item.get('summary', '')}. "
+        f"tags: {' '.join(tags)}"
     )
 
 
+def video_text(item: dict) -> str:
+    return item_text(item)
+
+
 def _catalog_path(catalog_file: str | None = None) -> Path:
-    name = catalog_file or os.getenv("PUSH_VIDEOS", "catalog.json")
+    name = (
+        catalog_file
+        or os.getenv("PUSH_CATALOG", "").strip()
+        or os.getenv("PUSH_VIDEOS", "").strip()
+        or "catalog.json"
+    )
     return PROJECT_ROOT / "data" / name
 
 
@@ -52,12 +64,9 @@ def dedup_hash(anchor: str, positive_id: str, label: str) -> str:
 
 
 def _last_user(context: str) -> str:
-    for line in reversed((context or "").strip().splitlines()):
-        s = line.strip()
-        for prefix in ("用户:", "用户：", "user:", "User:"):
-            if s.startswith(prefix):
-                return s[len(prefix):].strip()
-    return ""
+    from policy.keywords import last_user_utterance
+
+    return last_user_utterance(context)
 
 
 async def build_candidate_rows(

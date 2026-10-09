@@ -27,6 +27,7 @@ VECTOR_DIM = 384
 NUM_VIDEOS = 100
 NUM_TOPICS = 12
 FAISS_TOPK = 30
+FAISS_EF_SEARCH = 64
 MMR_LAMBDA = 0.7
 MMR_RESULT_N = 10
 
@@ -55,10 +56,43 @@ SERVER_WORKERS = int(os.getenv("SERVER_WORKERS", 4))
 PUSH_USE_MOCK_VECTORS = os.getenv("PUSH_USE_MOCK_VECTORS", "0").strip().lower() in ("1", "true", "yes")
 VECTOR_MANIFEST_PATH = os.path.join(DATA_DIR, "..", "data", "vector_manifest.json")
 
-_push_videos_file = os.getenv("PUSH_VIDEOS", "catalog.json").strip() or "catalog.json"
 DATA_ROOT = os.path.join(DATA_DIR, "..", "data")
-EMBEDDINGS_PATH = os.path.join(DATA_ROOT, "video_embeddings.npy")
 TOPIC_VECS_PATH = os.path.join(DATA_ROOT, "topic_vecs.npy")
-TOPIC_VIDEO_VECS_PATH = os.path.join(DATA_ROOT, "video_topic_vecs.npy")
 FAISS_INDEX_PATH = os.path.join(DATA_ROOT, "faiss_index.bin")
-VIDEO_META_PATH = os.path.join(DATA_ROOT, _push_videos_file)
+
+
+def catalog_filename() -> str:
+    return (
+        os.getenv("PUSH_CATALOG", "").strip()
+        or os.getenv("PUSH_VIDEOS", "").strip()
+        or "catalog.json"
+    )
+
+
+def catalog_path() -> str:
+    return os.path.join(DATA_ROOT, catalog_filename())
+
+
+def _prefer_artifact(preferred: str, legacy: str) -> str:
+    new_path = os.path.join(DATA_ROOT, preferred)
+    old_path = os.path.join(DATA_ROOT, legacy)
+    if os.path.isfile(new_path):
+        return new_path
+    if os.path.isfile(old_path):
+        return old_path
+    return new_path
+
+
+def embeddings_path() -> str:
+    return _prefer_artifact("item_embeddings.npy", "video_embeddings.npy")
+
+
+def item_topic_vecs_path() -> str:
+    return _prefer_artifact("item_topic_vecs.npy", "video_topic_vecs.npy")
+
+
+# Resolved at import for callers that still read the constants. Reload paths
+# should call the functions above so a newly generated file is picked up.
+EMBEDDINGS_PATH = embeddings_path()
+TOPIC_VIDEO_VECS_PATH = item_topic_vecs_path()
+VIDEO_META_PATH = catalog_path()

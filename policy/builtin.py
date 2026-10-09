@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import random
 import time
 from typing import Any, Dict, List, Optional
@@ -17,6 +16,7 @@ from .keywords import (
     is_handoff_request,
     is_item_request,
     sensitive_topics,
+    signal_forces_handoff,
 )
 from .state import StateManager
 
@@ -43,28 +43,45 @@ class BuiltinThresholdPolicy(DecisionPolicy):
 
         self.state.add_message(time.time())
 
-        active_item = is_item_request(user_message)
+        trigger_mode = str(signals.get("trigger_mode") or "auto")
+        content_need = str(signals.get("content_need") or "none")
+        active_item = trigger_mode == "active" or is_item_request(user_message)
         active_handoff = is_handoff_request(user_message)
-        if self.state.get("cool_down_remain") > 0 and not active_item and not active_handoff:
-            remain = self.state.get("cool_down_remain") - 1
-            self.state.set("cool_down_remain", remain)
+        if content_need == "item":
+            active_handoff = False
+        elif content_need == "handoff":
+            active_handoff = True
+            handoff_suggested = True
+        if not active_item and not active_handoff and self.state.consume_cooldown():
             return events
 
-        urge = min(self.state.get("urge") + cfg.urge_delta, 1.0)
-        self.state.set("urge", urge)
+        self.state.bump_urge(cfg.urge_delta, 1.0)
 
-        risk_alert = bool(signals.get("risk_alert"))
+        risk_alert = signal_forces_handoff(signals)
         handoff_first = risk_alert or active_handoff
+        if content_need == "item" and not risk_alert:
+            events.extend(
+                self._evaluate_item(user_message, candidates, state=state, force_active=active_item)
+            )
+            return events
         if handoff_first:
             handoff_events = self._evaluate_handoff(
-                user_message, positive_rate, handoff_suggested=handoff_suggested, risk_alert=risk_alert
+                user_message,
+                positive_rate,
+                handoff_suggested=handoff_suggested,
+                risk_alert=risk_alert,
+                force_active=content_need == "handoff",
             )
             if handoff_events:
                 events.extend(handoff_events)
             else:
-                events.extend(self._evaluate_item(user_message, candidates, state=state))
+                events.extend(
+                    self._evaluate_item(user_message, candidates, state=state, force_active=active_item)
+                )
         else:
-            item_events = self._evaluate_item(user_message, candidates, state=state)
+            item_events = self._evaluate_item(
+                user_message, candidates, state=state, force_active=active_item
+            )
             events.extend(item_events)
             if not item_events:
                 events.extend(
@@ -95,7 +112,7 @@ class BuiltinThresholdPolicy(DecisionPolicy):
     ) -> float:
         cfg = self._cfg()
         w = cfg.a_weights
-        I = min(top1_similarity, 1.0)
+        I = min(max(float(top1_similarity), 0.0), 1.0)
         divisor = max(cfg.recent_push_load_divisor, 1)
         L = 1.0 - min(recent_push_count_5min / float(divisor), 1.0)
         total_exposures = self.state.get("total_exposures")
@@ -134,23 +151,18 @@ class BuiltinThresholdPolicy(DecisionPolicy):
         return [c for c in candidates if c.get("item_id") not in recent]
 
     def _softmax_sample(self, candidates: List[Dict]) -> Optional[Dict]:
-        cfg = self._cfg()
-        tau = self.state.get("tau") or cfg.tau_init
-        if tau <= 0:
-            tau = cfg.tau_init
-        scores = [c.get("prob_base", 0) for c in candidates]
-        if not scores:
+        if not candidates:
             return None
-        max_score = max(scores)
-        exp_scores = [math.exp((s - max_score) / tau) for s in scores]
-        total = sum(exp_scores) + 1e-8
-        probs = [e / total for e in exp_scores]
-        r = random.random()
+        weights = [max(float(c.get("prob_base") or 0), 0.0) for c in candidates]
+        total = sum(weights)
+        if total <= 0:
+            return candidates[0]
+        draw = random.random() * total
         cumsum = 0.0
-        for i, p in enumerate(probs):
-            cumsum += p
-            if r <= cumsum:
-                return candidates[i]
+        for cand, weight in zip(candidates, weights):
+            cumsum += weight
+            if draw <= cumsum:
+                return cand
         return candidates[-1]
 
     def _pick_item(self, candidates: List[Dict]) -> Optional[Dict]:
@@ -204,7 +216,7 @@ class BuiltinThresholdPolicy(DecisionPolicy):
     def _emit_auto_item_push(self, selected: Dict, A: float, N: int, *, quota_forced: bool = False) -> ItemPushEvent:
         now_ms = int(time.time() * 1000)
         self.state.set("urge", 0)
-        self.state.set("last_push_ts", now_ms)
+        self.state.note_push(now_ms, self._cfg().recent_push_window_ms)
         self.state.add_push_history(selected["item_id"])
         self._record_auto_item_push()
         data = {
@@ -222,16 +234,22 @@ class BuiltinThresholdPolicy(DecisionPolicy):
             data["quota_forced"] = True
         return ItemPushEvent(data=data)
 
-    def _evaluate_item(self, user_message: str, candidates: Optional[List[Dict]], state: str = "INIT") -> List[PushEvent]:
+    def _evaluate_item(
+        self,
+        user_message: str,
+        candidates: Optional[List[Dict]],
+        state: str = "INIT",
+        force_active: bool = False,
+    ) -> List[PushEvent]:
         cfg = self._cfg()
         events: List[PushEvent] = []
-        is_active = is_item_request(user_message)
+        is_active = force_active or is_item_request(user_message)
 
         if is_active:
             if candidates:
                 selected = candidates[0]
-                self.state.set("urge", self.state.get("urge") * cfg.urge_active_item_decay)
-                self.state.set("last_push_ts", int(time.time() * 1000))
+                self.state.scale_urge(cfg.urge_active_item_decay)
+                self.state.note_push(int(time.time() * 1000), cfg.recent_push_window_ms)
                 self.state.add_push_history(selected["item_id"])
                 events.append(
                     ItemPushEvent(
@@ -263,9 +281,8 @@ class BuiltinThresholdPolicy(DecisionPolicy):
         if not self._check_cool_down() and not self._should_quota_force_auto_item(top1_sim, dedup, candidates):
             return events
 
-        last_push = self.state.get("last_push_ts")
         now_ms = int(time.time() * 1000)
-        recent_count = 1 if last_push > 0 and (now_ms - last_push) < cfg.recent_push_window_ms else 0
+        recent_count = self.state.count_recent_pushes(now_ms, cfg.recent_push_window_ms)
         A = self._compute_acceptance_a(top1_sim, recent_count, state)
         N = self._map_push_count(A, len(pool))
         quota_forced = False
@@ -352,12 +369,17 @@ class BuiltinThresholdPolicy(DecisionPolicy):
         return min(base, allowed)
 
     def _evaluate_handoff(
-        self, user_message: str, positive_rate: float, handoff_suggested: bool = False, risk_alert: bool = False
+        self,
+        user_message: str,
+        positive_rate: float,
+        handoff_suggested: bool = False,
+        risk_alert: bool = False,
+        force_active: bool = False,
     ) -> List[PushEvent]:
         events: List[PushEvent] = []
         last_ts = self.state.get("last_handoff_push_ts")
         now_ms = int(time.time() * 1000)
-        is_active_request = is_handoff_request(user_message)
+        is_active_request = force_active or is_handoff_request(user_message)
         quota_forced = False
         under_quota, _, _ = self._auto_handoff_quota_status()
 
@@ -429,8 +451,11 @@ class BuiltinThresholdPolicy(DecisionPolicy):
             self.state.record_feedback_outcome(is_positive=False, is_strong_negative=True)
         self.state.set("tau", tau)
 
-    def record_video_feedback(self, item_id: str, feedback_type: str):
+    def record_item_feedback(self, item_id: str, feedback_type: str):
         self._apply_feedback(feedback_type)
+
+    def record_video_feedback(self, item_id: str, feedback_type: str):
+        self.record_item_feedback(item_id, feedback_type)
 
     def record_engagement(
         self,
@@ -443,13 +468,8 @@ class BuiltinThresholdPolicy(DecisionPolicy):
     ) -> dict:
         if config is not None:
             self._active_config = config
-        was_clicked = item_id in getattr(self, "_clicked", set())
-        if not hasattr(self, "_clicked"):
-            self._clicked = set()
-
         if event == "click":
-            self.state.record_click()
-            self._clicked.add(item_id)
+            self.state.mark_clicked(item_id)
             return {
                 "feedback_type": None,
                 "reason": "click_recorded",
@@ -458,18 +478,21 @@ class BuiltinThresholdPolicy(DecisionPolicy):
             }
 
         consecutive_negative = self.state.get("consecutive_negative")
+        cfg = self._cfg()
         feedback_type, reason = classify_feedback(
             event=event,
             watch_duration_sec=watch_duration_sec,
             item_duration_sec=item_duration_sec,
             consecutive_negative=consecutive_negative,
-            was_clicked=(item_id in self._clicked) or event == "watch_end",
+            was_clicked=self.state.has_click(item_id),
+            positive_ratio=cfg.positive_dwell_ratio,
+            short_ratio=cfg.short_dwell_ratio,
         )
         item_duration_sec = max(item_duration_sec, 1.0)
         watch_ratio = round(watch_duration_sec / item_duration_sec, 4)
         if feedback_type:
             self._apply_feedback(feedback_type)
-            self._clicked.discard(item_id)
+            self.state.forget_click(item_id)
         return {
             "feedback_type": feedback_type,
             "reason": reason,

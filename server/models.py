@@ -5,11 +5,14 @@ from typing import List, Optional, Literal, Dict, Any
 
 
 class IntentModel(BaseModel):
-    primary_topic: Optional[str] = None
+    primary_topic: Optional[str] = Field(None, description="Boost candidates whose tags or text contain this topic")
     query: str = ""
-    exclude_topics: List[str] = Field(default_factory=list)
+    exclude_topics: List[str] = Field(default_factory=list, description="Drop candidates whose tags or text contain any of these")
     is_meta: bool = False
-    content_need: Literal["item", "handoff", "none"] = "none"
+    content_need: Literal["item", "handoff", "none"] = Field(
+        "none",
+        description="none is no preference. item skips handoff unless a force-handoff signal is set. handoff prefers a handoff.",
+    )
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
 
@@ -60,6 +63,10 @@ class PolicyConfigModel(BaseModel):
     cooldown_ms_max: int = 90000
     state_modulation: Dict[str, float] = Field(
         default_factory=lambda: {
+            "start": -0.04,
+            "explore": -0.02,
+            "focus": 0.0,
+            "close": 0.06,
             "INIT": -0.04,
             "GATHERING": -0.02,
             "DEEPENING": 0.0,
@@ -79,12 +86,15 @@ class PolicyConfigModel(BaseModel):
     auto_handoff_quota_min_session_msgs: int = 2
     handoff_push_cooldown_ms: int = 300000
     handoff_session_push_cap: int = 3
+    provider: str = "builtin:default"
+    positive_dwell_ratio: float = 0.50
+    short_dwell_ratio: float = 0.10
 
 
 class FeedbackEvent(BaseModel):
     item_id: str
     event: Literal[
-        "exposed", "click", "watch_end", "dismiss", "no_click",
+        "exposed", "click", "watch_end", "dwell_end", "dismiss", "no_click",
         "share", "favorite", "not_interested",
     ]
     watch_duration_sec: float = 0
@@ -110,13 +120,16 @@ class PushResponse(BaseModel):
 
 class PushRequest(BaseModel):
     context: str = Field(..., description="Recent conversation text")
-    load_factor: float = Field(0.8, ge=0.0, le=1.0, description="Load factor")
     positive_rate: float = Field(0.6, ge=0.0, le=1.0, description="Positive feedback rate")
-    intimacy: float = Field(0.4, ge=0.0, le=1.0, description="Intimacy")
-    urge: float = Field(0.7, ge=0.0, le=1.0, description="Urge value")
-    trigger_mode: Literal["auto", "active"] = "auto"
-    item_type: Optional[str] = None
-    experiment_id: Optional[str] = None
+    trigger_mode: Literal["auto", "active"] = Field(
+        "auto",
+        description="active forces an item push when candidates exist; auto uses keyword detection",
+    )
+    item_type: Optional[str] = Field(None, description="Keep only candidates with this item_type")
+    experiment_id: Optional[str] = Field(
+        None,
+        description="Force a named policy profile, or pass the active experiment name to keep session split",
+    )
     signals: Dict[str, Any] = Field(default_factory=dict, description="Extensible signals (e.g. risk_alert)")
     state: str = Field("INIT", description="Generic conversation state label")
     session_id: Optional[str] = Field(None, description="Session id for server-side state")

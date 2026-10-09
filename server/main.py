@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import json
@@ -5,22 +6,30 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import SERVER_HOST, SERVER_PORT
 from .models import PushRequest, PushResponse, FeedbackEvent, FeedbackResponse, PolicyConfigModel
 from .vector_service import VectorService
 from .cache_service import CacheService
-from .ranking import apply_ranking, extract_last_user_message
+from .ranking import extract_last_user_message, load_ranker
 from .push_decision_service import run_push_decision
 from .push_session_store import get_session_state
 from .admin_routes import router as admin_router
 from .internal_routes import router as internal_router
 from .training_routes import router as training_router
 from handoff import load_handoff
-from policy import BuiltinThresholdPolicy, classify_feedback, load_policy_config, reload_policy_config
+from policy import classify_feedback, load_policy, load_policy_config, reload_policy_config
+from policy.config import PolicyConfig
+from policy.keywords import signal_forces_handoff
+from policy.state import FileStateBackend
 from selftrain.collector import TrainingCollector
+
+from .metrics import hit
+from .ratelimit import allow, client_key, max_body_bytes
+from .security import PLACEHOLDER_SECRETS, check_bearer, enforce_production_config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,11 +61,23 @@ def _current_policy_config() -> PolicyConfigModel:
     return PolicyConfigModel(**load_policy_config().to_dict())
 
 
-def _policy_config_for_request(session_id: str | None) -> PolicyConfigModel:
+def _policy_config_for_request(session_id: str | None, experiment_id: str | None = None) -> PolicyConfigModel:
     _current_policy_config()
     from .ab_resolver import resolve_config_for_session
 
-    return PolicyConfigModel(**resolve_config_for_session(session_id))
+    try:
+        resolved = resolve_config_for_session(session_id, experiment_id=experiment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PolicyConfigModel(**resolved)
+
+
+def _decision_signals(request: PushRequest) -> dict:
+    signals = dict(request.signals or {})
+    signals["trigger_mode"] = request.trigger_mode
+    if request.intent is not None:
+        signals["content_need"] = request.intent.content_need
+    return signals
 
 
 def reload_handoff_from_vectors() -> None:
@@ -67,6 +88,11 @@ def reload_handoff_from_vectors() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Push Microservice...")
+    enforce_production_config()
+    from .config import HMAC_SECRET_KEY
+
+    if HMAC_SECRET_KEY.strip() in PLACEHOLDER_SECRETS:
+        logger.warning("HMAC_SECRET_KEY is a placeholder; set a unique secret before production.")
     vector_service.load()
     reload_handoff_from_vectors()
     await cache_service.connect()
@@ -79,11 +105,34 @@ async def lifespan(app: FastAPI):
     logger.info("Server shutdown complete.")
 
 
-app = FastAPI(title="Push Microservice", version="2.0.0", lifespan=lifespan)
+_is_production = os.getenv("PUSH_ENV", "development").strip().lower() == "production"
+app = FastAPI(
+    title="Push Microservice",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
+)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.include_router(admin_router)
 app.include_router(internal_router)
 app.include_router(training_router)
+
+
+@app.middleware("http")
+async def limit_public_api(request: Request, call_next):
+    if request.url.path.startswith("/api/v1"):
+        body = await request.body()
+        if len(body) > max_body_bytes():
+            return JSONResponse(status_code=413, content={"detail": "request body too large"})
+        key = client_key(
+            request.headers.get("x-forwarded-for"),
+            request.client.host if request.client else None,
+        )
+        if not await allow(key, cache_service):
+            return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -106,16 +155,67 @@ async def health():
     }
 
 
+@app.get("/ready")
+async def ready():
+    if vector_service.index is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "redis": cache_service.available, "index": False},
+        )
+    try:
+        vector_service.maybe_reload()
+    except Exception as exc:
+        logger.warning("vector reload failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "redis": cache_service.available, "index": False},
+        )
+    if not cache_service.available:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "redis": False, "index": True},
+        )
+    return {"status": "ok", "redis": True, "index": True}
+
+
+def _cache_material(request: PushRequest) -> str:
+    intent = request.intent.model_dump() if request.intent is not None else None
+    return json.dumps(
+        {
+            "context": request.context,
+            "item_type": request.item_type,
+            "positive_rate": request.positive_rate,
+            "signals": request.signals,
+            "state": request.state,
+            "intent": intent,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+
+
 def _extract_user_message(context: str) -> str:
-    last = extract_last_user_message(context) or ""
-    if last:
-        return last
-    for line in context.strip().split("\n"):
-        if line.startswith("用户:"):
-            return line.removeprefix("用户:").strip()
-        if line.lower().startswith("user:"):
-            return line[5:].strip()
-    return ""
+    return extract_last_user_message(context) or ""
+
+
+def require_api_token(authorization: str | None = Header(default=None)) -> None:
+    token = os.environ.get("PUSH_API_TOKEN", "").strip()
+    if not token:
+        return
+    check_bearer(authorization, token)
+
+
+def _rank_candidates(context, candidates, metadata, *, lexical_primary, intent, item_type=None):
+    ranker = load_ranker()
+    return ranker.rank(
+        context,
+        candidates,
+        metadata,
+        lexical_primary=lexical_primary,
+        intent=intent,
+        item_type=item_type,
+    )
 
 
 async def _build_push_response(
@@ -131,7 +231,7 @@ async def _build_push_response(
         candidates=candidates,
         positive_rate=request.positive_rate,
         handoff_suggested=handoff_suggested,
-        signals=request.signals,
+        signals=_decision_signals(request),
         state=request.state,
         policy_config=policy_config.model_dump(),
     )
@@ -162,40 +262,52 @@ async def _build_push_response(
 
 
 @app.post("/api/v1/push", response_model=PushResponse)
-async def push(request: PushRequest):
+async def push(request: PushRequest, _: None = Depends(require_api_token)):
     if not request.context.strip():
         raise HTTPException(status_code=400, detail="context cannot be empty")
 
-    policy_config = _policy_config_for_request(request.session_id)
+    policy_config = _policy_config_for_request(request.session_id, request.experiment_id)
     intent = request.intent
-    skip_cache = intent is not None and getattr(intent, "confidence", 0) >= 0.5
+    try:
+        vector_service.maybe_reload()
+    except Exception as exc:
+        logger.warning("vector reload before push failed: %s", exc)
+        raise HTTPException(status_code=503, detail="vector index is not ready") from exc
+    cache_key = _cache_material(request)
 
-    cached = None if skip_cache else await cache_service.get(request.context)
+    cached = await cache_service.get(cache_key)
     if cached:
+        await hit("cache_hit", cache_service)
         logger.info("Cache hit for context hash")
         raw_candidates = cached.get("candidates", [])
-        guarded = apply_ranking(
+        guarded = _rank_candidates(
             request.context,
             raw_candidates,
             vector_service.item_metadata,
             lexical_primary=vector_service._use_mock,
             intent=intent,
+            item_type=request.item_type,
         )
-        handoff_suggested = bool(cached.get("handoff_suggested")) or bool(
-            request.signals.get("risk_alert")
+        handoff_suggested = bool(cached.get("handoff_suggested")) or signal_forces_handoff(
+            request.signals
         )
+        await hit("push", cache_service)
+        if handoff_suggested:
+            await hit("handoff", cache_service)
         return await _build_push_response(request, guarded, handoff_suggested, policy_config)
 
+    await hit("cache_miss", cache_service)
     candidates, ctx_vec, _ = vector_service.process_request(request.context, intent=intent)
-    candidates = apply_ranking(
+    candidates = _rank_candidates(
         request.context,
         candidates,
         vector_service.item_metadata,
         lexical_primary=vector_service._use_mock,
         intent=intent,
+        item_type=request.item_type,
     )
 
-    effective_handoff = bool(request.signals.get("risk_alert")) or handoff_service.should_handoff(
+    effective_handoff = signal_forces_handoff(request.signals) or handoff_service.should_handoff(
         context=request.context,
         signals=request.signals,
         state=request.state,
@@ -207,38 +319,55 @@ async def push(request: PushRequest):
         "candidates": [c.model_dump() if hasattr(c, "model_dump") else c for c in candidates],
         "handoff_suggested": effective_handoff,
     }
-    await cache_service.set(request.context, cache_payload)
+    await cache_service.set(cache_key, cache_payload)
 
+    await hit("push", cache_service)
+    if effective_handoff:
+        await hit("handoff", cache_service)
     return await _build_push_response(request, candidates, effective_handoff, policy_config)
 
 
-FEEDBACK_LOG_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "reports", "feedback_events.jsonl"
-)
+def _append_feedback_line(path: str, line: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    backend = FileStateBackend(path)
+    with backend.exclusive():
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
+def feedback_log_path(moment: datetime | None = None) -> str:
+    day = (moment or datetime.now(timezone.utc)).strftime("%Y%m%d")
+    reports = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reports")
+    return os.path.join(reports, f"feedback-{day}.jsonl")
 
 
 @app.post("/api/v1/feedback", response_model=FeedbackResponse)
-async def feedback(event: FeedbackEvent):
-    consecutive_negative = 0
+async def feedback(event: FeedbackEvent, _: None = Depends(require_api_token)):
+    policy_model = _policy_config_for_request(event.session_id)
     if event.session_id:
-        state = get_session_state(event.session_id)
-        consecutive_negative = state.get("consecutive_negative") or 0
-
-    feedback_type, reason = classify_feedback(
-        event=event.event,
-        watch_duration_sec=event.watch_duration_sec,
-        item_duration_sec=event.item_duration_sec,
-        consecutive_negative=consecutive_negative,
-        was_clicked=event.event in ("watch_end", "dismiss", "share", "favorite"),
-    )
-
-    if event.session_id:
-        engine = BuiltinThresholdPolicy(state=get_session_state(event.session_id))
-        engine.record_engagement(
+        engine = load_policy(
+            state=get_session_state(event.session_id),
+            config=PolicyConfig.from_dict(policy_model.model_dump()),
+        )
+        recorded = engine.record_engagement(
             item_id=event.item_id,
             event=event.event,
             watch_duration_sec=event.watch_duration_sec,
             item_duration_sec=event.item_duration_sec,
+        )
+        feedback_type = recorded.get("feedback_type")
+        reason = recorded.get("reason")
+    else:
+        feedback_type, reason = classify_feedback(
+            event=event.event,
+            watch_duration_sec=event.watch_duration_sec,
+            item_duration_sec=event.item_duration_sec,
+            consecutive_negative=0,
+            was_clicked=False,
+            positive_ratio=policy_model.positive_dwell_ratio,
+            short_ratio=policy_model.short_dwell_ratio,
         )
 
     log_entry = {
@@ -264,9 +393,12 @@ async def feedback(event: FeedbackEvent):
     except Exception as exc:
         logger.debug("collector.record_feedback skipped: %s", exc)
 
-    os.makedirs(os.path.dirname(FEEDBACK_LOG_PATH), exist_ok=True)
-    with open(FEEDBACK_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    log_path = feedback_log_path()
+    line = json.dumps(log_entry, ensure_ascii=False) + "\n"
+    await asyncio.to_thread(_append_feedback_line, log_path, line)
+
+    metric = f"feedback_{feedback_type}" if feedback_type in ("positive", "negative", "strong_negative") else "feedback_other"
+    await hit(metric, cache_service)
 
     return FeedbackResponse(accepted=True, classified_feedback=feedback_type, reason=reason)
 

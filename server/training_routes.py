@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,21 @@ from .admin_routes import require_push_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/training", tags=["push-training"])
+
+
+def _in_process_training_allowed() -> bool:
+    if os.getenv("PUSH_ENV", "development").strip().lower() != "production":
+        return True
+    return os.getenv("TRAINING_IN_PROCESS", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _require_in_process_training() -> None:
+    if _in_process_training_allowed():
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="in-process training is disabled when PUSH_ENV=production; run python -m selftrain.scheduler",
+    )
 
 
 class RunBody(BaseModel):
@@ -70,6 +86,7 @@ async def training_funnel(_: None = Depends(require_push_admin)):
 
 @router.post("/run")
 async def training_run(body: RunBody, _: None = Depends(require_push_admin)):
+    _require_in_process_training()
     from selftrain.loop import run_cycle
 
     try:

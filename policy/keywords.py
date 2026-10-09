@@ -57,6 +57,48 @@ def exclusion_rules() -> list[dict[str, Any]]:
     return list(load_keywords().get("exclusion_rules") or [])
 
 
+_DEFAULT_USER_PREFIXES = ["user:", "User:", "用户:", "用户："]
+
+
+def user_prefixes() -> list[str]:
+    ctx = load_keywords().get("context") or {}
+    prefixes = ctx.get("user_prefixes")
+    if isinstance(prefixes, list) and prefixes:
+        return [str(p) for p in prefixes if str(p)]
+    return list(_DEFAULT_USER_PREFIXES)
+
+
+def force_handoff_signal() -> str:
+    signals = load_keywords().get("signals") or {}
+    name = str(signals.get("force_handoff") or "risk_alert").strip()
+    return name or "risk_alert"
+
+
+def signal_forces_handoff(signals: dict[str, Any] | None) -> bool:
+    signals = signals or {}
+    return bool(signals.get(force_handoff_signal()))
+
+
+def strip_user_prefix(line: str) -> str | None:
+    text = (line or "").strip()
+    if not text:
+        return None
+    for prefix in user_prefixes():
+        if text.startswith(prefix):
+            return text[len(prefix):].strip() or None
+        if prefix.isascii() and text.lower().startswith(prefix.lower()):
+            return text[len(prefix):].strip() or None
+    return None
+
+
+def last_user_utterance(context: str) -> str:
+    for line in reversed((context or "").splitlines()):
+        stripped = strip_user_prefix(line)
+        if stripped:
+            return stripped
+    return ""
+
+
 def _has_any(text: str, words: list[str]) -> bool:
     return any(w and w in text for w in words)
 

@@ -20,12 +20,23 @@ from .state import StateManager
 _REGISTRY = {"builtin": BuiltinThresholdPolicy}
 
 
+def _resolve_provider(provider: Optional[str], config: Optional[PolicyConfig]) -> str:
+    if provider and provider.strip():
+        return provider.strip()
+    env = os.environ.get("POLICY_PROVIDER", "").strip()
+    if env:
+        return env
+    cfg = config or load_policy_config()
+    configured = (getattr(cfg, "provider", "") or "").strip()
+    return configured or "builtin:default"
+
+
 def load_policy(
     state: Optional[StateManager] = None,
     config: Optional[PolicyConfig] = None,
     provider: Optional[str] = None,
 ) -> DecisionPolicy:
-    provider = (provider or os.environ.get("POLICY_PROVIDER", "builtin:default")).strip()
+    provider = _resolve_provider(provider, config)
     if ":" in provider:
         module_name, _, attr = provider.partition(":")
     else:

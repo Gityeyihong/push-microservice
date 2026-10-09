@@ -32,8 +32,14 @@ def classify_feedback(
     item_duration_sec: float = DEFAULT_ITEM_DURATION_SEC,
     consecutive_negative: int = 0,
     was_clicked: bool = False,
+    positive_ratio: float | None = None,
+    short_ratio: float | None = None,
 ) -> Tuple[Optional[str], str]:
     """Map raw UI events to feedback_type. None = intermediate state only."""
+    if positive_ratio is None:
+        positive_ratio = POSITIVE_WATCH_RATIO
+    if short_ratio is None:
+        short_ratio = FAST_SWIPE_RATIO
     item_duration_sec = max(item_duration_sec, 1.0)
     ratio = _watch_ratio(watch_duration_sec, item_duration_sec)
 
@@ -54,17 +60,17 @@ def classify_feedback(
     elif event == "dismiss":
         if not was_clicked:
             feedback_type, reason = "negative", "dismiss_without_click"
-        elif ratio < FAST_SWIPE_RATIO:
-            feedback_type, reason = "negative", "fast_swipe"
+        elif ratio < short_ratio:
+            feedback_type, reason = "negative", "short_dwell"
         else:
             feedback_type, reason = "negative", "dismiss_after_partial_watch"
-    elif event == "watch_end":
-        if ratio > POSITIVE_WATCH_RATIO:
-            feedback_type, reason = "positive", "watch_above_threshold"
-        elif ratio < FAST_SWIPE_RATIO:
-            feedback_type, reason = "negative", "fast_swipe"
+    elif event in ("watch_end", "dwell_end"):
+        if ratio > positive_ratio:
+            feedback_type, reason = "positive", "dwell_above_threshold"
+        elif ratio < short_ratio:
+            feedback_type, reason = "negative", "short_dwell"
         else:
-            feedback_type, reason = "negative", "watch_below_threshold"
+            feedback_type, reason = "negative", "dwell_below_threshold"
     else:
         return None, f"unknown_event:{event}"
 

@@ -69,7 +69,7 @@
 ## 6. 部署
 
 - 本机：`python run_server.py`。
-- 容器：`docker compose up`（Redis + 服务）。
+- 容器：`docker compose up`（Redis 7，需密码，端口只绑 `127.0.0.1`）。服务进程以 uid 10001 运行。编排健康检查打 `/ready`。
 - 训练依赖与 serving 分离（`requirements-train.txt`）。
 - 生产存储：Postgres（`DATABASE_URL`）+ Redis（`REDIS_URL`）；未配置自动回退 SQLite。
 

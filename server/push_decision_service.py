@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from policy.builtin import BuiltinThresholdPolicy
+from policy import load_policy
 from policy.config import PolicyConfig, load_policy_config
 
 from .models import PushEventModel
@@ -32,7 +32,7 @@ def run_push_decision(
 ) -> tuple[List[PushEventModel], dict]:
     cfg = PolicyConfig.from_dict(policy_config) if policy_config else load_policy_config()
     session_state = get_session_state(session_id or "default")
-    engine = BuiltinThresholdPolicy(state=session_state, config=cfg)
+    engine = load_policy(state=session_state, config=cfg)
 
     events = engine.process(
         user_message=user_message,

@@ -15,6 +15,19 @@ _CONFIG_CACHE: Optional["PolicyConfig"] = None
 HANDOFF_LINK = os.environ.get("HANDOFF_LINK", "https://example.com/handoff")
 
 
+def default_state_modulation() -> dict[str, float]:
+    return {
+        "start": -0.04,
+        "explore": -0.02,
+        "focus": 0.0,
+        "close": 0.06,
+        "INIT": -0.04,
+        "GATHERING": -0.02,
+        "DEEPENING": 0.0,
+        "TAILORING": 0.06,
+    }
+
+
 @dataclass
 class AWeights:
     I: float = 0.18
@@ -57,14 +70,7 @@ class PolicyConfig:
     urge_active_item_decay: float = 0.7
     cooldown_ms: int = 90000
     cooldown_ms_max: int = 90000
-    state_modulation: dict[str, float] = field(
-        default_factory=lambda: {
-            "INIT": -0.04,
-            "GATHERING": -0.02,
-            "DEEPENING": 0.0,
-            "TAILORING": 0.06,
-        }
-    )
+    state_modulation: dict[str, float] = field(default_factory=default_state_modulation)
     recent_push_window_ms: int = 300000
     recent_push_load_divisor: int = 3
     session_msg_cap: int = 30
@@ -78,6 +84,9 @@ class PolicyConfig:
     auto_handoff_quota_min_session_msgs: int = 2
     handoff_push_cooldown_ms: int = 300000
     handoff_session_push_cap: int = 3
+    provider: str = "builtin:default"
+    positive_dwell_ratio: float = 0.50
+    short_dwell_ratio: float = 0.10
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PolicyConfig":
@@ -100,7 +109,10 @@ class PolicyConfig:
             urge_active_item_decay=float(data.get("urge_active_item_decay", 0.7)),
             cooldown_ms=int(data.get("cooldown_ms", 90000)),
             cooldown_ms_max=int(data.get("cooldown_ms_max", 90000)),
-            state_modulation=dict(data.get("state_modulation") or {}),
+            state_modulation=dict(data.get("state_modulation") or default_state_modulation()),
+            provider=str(data.get("provider") or "builtin:default"),
+            positive_dwell_ratio=float(data.get("positive_dwell_ratio", 0.50)),
+            short_dwell_ratio=float(data.get("short_dwell_ratio", 0.10)),
             recent_push_window_ms=int(data.get("recent_push_window_ms", 300000)),
             recent_push_load_divisor=int(data.get("recent_push_load_divisor", 3)),
             session_msg_cap=int(data.get("session_msg_cap", 30)),

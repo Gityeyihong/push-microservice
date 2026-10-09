@@ -1,50 +1,26 @@
-# 迁移与通用化记录
+# 接入与升级
 
-本项目的早期版本是一个面向特定业务的推送服务，现已**通用化并去领域化**为开源推荐/推送微服务。
-本文记录：去领域化范围、接口泛化、可扩展点，以及后续事项。
+本仓库是通用推荐/推送微服务。接入时替换配置和目录，不必改服务代码。
 
-## 1. 去领域化范围
+## 替换什么
 
-| 类别 | 处理 |
+| 内容 | 位置 |
 |------|------|
-| 领域关键词/话术 | 全部外置到 `config/keywords.json`（通用默认值），代码零领域词 |
-| 领域话题/示例数据 | `data/topics.py` 换为通用话题；`data/catalog.json` 换为中性知识/教程目录 |
-| 领域模式（如 mentor/proxy 等） | 移除，交互模式概念删除，改为通用 `signals` + `state` |
-| 转人工/导师逻辑 | 抽象为通用 `HandoffPolicy`（`handoff/`），文案/关键词中性化、可配置 |
-| 决策引擎 | 抽象为 `DecisionPolicy`（`policy/`），默认阈值策略，去领域规则 |
-| 厂商专用工具 | 移除云厂商导出脚本，改为通用 `scripts/import_catalog.py` |
-| 品牌/溯源引用 | 全部清除（代码、日志、文档） |
-| 领域集成测试 | 移除，改为通用策略/排序/存储测试 |
+| 关键词、意图规则、对话前缀、强制转人工信号名 | `config/keywords.json` |
+| 决策阈值、会话状态调制、策略实现名、停留时长阈值 | `config/policy.json` |
+| 条目目录 | `data/catalog.json`，或 `PUSH_CATALOG` 指向的文件 |
+| 决策 / 转人工 / 排序实现 | `POLICY_PROVIDER`、`HANDOFF_PROVIDER`、`RANKER_PROVIDER` |
 
-## 2. 接口泛化（破坏性变更）
+目录字段使用 `item_id`、`item_type`、`media_url`、`item_ref`。推送事件为 `item_push` / `handoff_push`。反馈接口是 `POST /api/v1/feedback`。
 
-| 旧 | 新 |
-|----|----|
-| `video_id` | `item_id` |
-| `CandidateVideo` | `CandidateItem` |
-| `vod_video_id` | `item_ref` |
-| `cover_url` | `media_url` |
-| `advisor_suggestion` | `handoff_suggested` |
-| 事件 `video_push` / `advisor_push` | `item_push` / `handoff_push` |
-| `interaction_mode` / `risk_alert` / `conversation_state` | `signals`（dict） + `state`（str） |
-| `resource_type` | `item_type` |
-| `decision_config` / `decision_config.json` | `policy_config` / `policy.json` |
-| `POST /api/v1/engagement` | `POST /api/v1/feedback` |
-| `/admin/decision-config` | `/admin/policy-config` |
-| `/admin/videos/reload` | `/admin/items/reload` |
-| `/internal/videos/{export,sync}` | `/internal/items/{export,sync}` |
-| 包 `mobile/` | 包 `policy/` |
-| `server/advisor_service.py` | 包 `handoff/` |
+## 向量文件
 
-## 3. 新增能力
+`python -m data.generate_data` 写入 `data/item_embeddings.npy` 与 `data/item_topic_vecs.npy`。若目录里只有旧文件名 `video_embeddings.npy`、`video_topic_vecs.npy`，服务启动时会回退读取。
 
-- 可继承接口：`DecisionPolicy`、`HandoffPolicy`、`RewardAdapter`（见 `docs/EXTENDING.md`）。
-- 通用存储层：`selftrain/store/`（Postgres/Redis 为主 + SQLite 回退）。
-- 推送成功率指标体系与门闸（见 `docs/SELF-TRAINING.md`）。
-- 通用目录导入：`scripts/import_catalog.py`。
+## 会话状态
 
-## 4. 遗留与后续
+`state` 是不透明字符串，调制系数在 `policy.json` 的 `state_modulation`。默认同时包含 `start` / `explore` / `focus` / `close` 和 `INIT` / `GATHERING` / `DEEPENING` / `TAILORING`，请求未传状态时仍是 `INIT`。
 
-- 会话状态为文件存储（单机）；多副本建议改为共享存储。
-- 位置偏差校正已输出 `propensity`，可按需启用 IPS 加权。
-- 领域无关的默认关键词为示例，接入时在 `config/keywords.json` 覆盖即可。
+## 反馈事件
+
+`watch_end` 仍然接受，并与 `dwell_end` 等价。正例原因码为 `dwell_above_threshold`。阈值可用 `positive_dwell_ratio` 与 `short_dwell_ratio` 覆盖。

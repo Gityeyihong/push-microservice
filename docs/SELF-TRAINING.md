@@ -98,7 +98,20 @@ class RewardAdapter(ABC):
 }
 ```
 
-## 10. 安全底线
+## 10. 调度进程
+
+定时训练不在推送服务进程里跑。另起：
+
+```powershell
+$env:TRAINING_SCHEDULE_ENABLED = "1"
+python -m selftrain.scheduler
+```
+
+它读取 `schedule.cron`、`min_new_samples`、`cooldown_hours`。有 `REDIS_URL` 时用 `lock:training-cycle` 保证只有一个调度进程进入 `run_cycle`；没有 Redis 时单进程照常跑并打警告。`POST /admin/training/run` 仍是人工触发。
+
+容器：先构建服务镜像，再 `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml up -d scheduler`。只执行 `docker compose up` 不会启动调度。调度镜像由 `Dockerfile.scheduler` 在构建期安装 `requirements-train.txt`。
+
+## 11. 安全底线
 
 - [x] 未配置外部审查器时正例不入训并 `tune_skipped`。
 - [x] held-out 退化必回滚，active 不变。

@@ -1,4 +1,10 @@
 {
+  "context": {
+    "user_prefixes": ["user:", "User:", "用户:", "用户："]
+  },
+  "signals": {
+    "force_handoff": "risk_alert"
+  },
   "item_request": {
     "keywords": [
       "recommend", "suggest", "show me", "give me", "any course", "any video",

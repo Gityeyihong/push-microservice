@@ -1,0 +1,24 @@
+# 自训练调度，不随默认 `docker compose up` 启动。
+# 先构建服务镜像，再构建调度镜像（训练依赖在构建期安装，不在启动时 pip install）：
+#   docker compose build
+#   docker compose -f docker-compose.yml -f docker-compose.scheduler.yml build scheduler
+#   docker compose -f docker-compose.yml -f docker-compose.scheduler.yml up -d scheduler
+services:
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    image: push-microservice:scheduler
+    container_name: push-scheduler
+    command: ["python", "-m", "selftrain.scheduler"]
+    env_file:
+      - .env
+    environment:
+      TRAINING_SCHEDULE_ENABLED: "1"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped

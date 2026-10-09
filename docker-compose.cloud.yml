@@ -1,10 +1,13 @@
 services:
   redis:
-    image: redis:6-alpine
+    image: redis:7-alpine
     pull_policy: never
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -21,12 +24,17 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      HMAC_SECRET_KEY: ${HMAC_SECRET_KEY:-change-this-in-production}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+      PUSH_ENV: ${PUSH_ENV:-production}
+      HMAC_SECRET_KEY: ${HMAC_SECRET_KEY:?set HMAC_SECRET_KEY}
+      PUSH_API_TOKEN: ${PUSH_API_TOKEN:?set PUSH_API_TOKEN}
+      PUSH_ADMIN_TOKEN: ${PUSH_ADMIN_TOKEN:?set PUSH_ADMIN_TOKEN}
+      PUSH_INTERNAL_TOKEN: ${PUSH_INTERNAL_TOKEN:?set PUSH_INTERNAL_TOKEN}
       PUSH_USE_MOCK_VECTORS: ${PUSH_USE_MOCK_VECTORS:-0}
+      PUSH_TRUSTED_PROXIES: ${PUSH_TRUSTED_PROXIES:-}
+      PUSH_SESSION_TTL_SEC: ${PUSH_SESSION_TTL_SEC:-604800}
       PUSH_SERVER_WORKERS: ${PUSH_SERVER_WORKERS:-1}
-      PUSH_ADMIN_TOKEN: ${PUSH_ADMIN_TOKEN:-}
-      PUSH_INTERNAL_TOKEN: ${PUSH_INTERNAL_TOKEN:-}
-      DECISION_CONFIG_PATH: /app/config/decision_config.json
+      POLICY_CONFIG_PATH: /app/config/policy.json
       PUSH_CONFIG_DIR: /app/config
     depends_on:
       redis:
@@ -34,13 +42,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config:/app/config:rw
-      - ./server:/app/server:ro
-      - ./mobile:/app/mobile:ro
-      - ./data:/app/data:rw
+      - ./config:/app/config
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
       interval: 15s
       timeout: 10s
       retries: 5

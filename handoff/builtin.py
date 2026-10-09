@@ -6,7 +6,7 @@ import numpy as np
 
 from .base import HandoffPolicy
 from policy.config import HANDOFF_LINK
-from policy.keywords import urgent_keywords
+from policy.keywords import signal_forces_handoff, urgent_keywords
 
 HELP_SIMILARITY_THRESHOLD = 0.6
 POSITIVE_RATE_THRESHOLD = 0.5
@@ -26,7 +26,7 @@ class BuiltinHandoffPolicy(HandoffPolicy):
         context_vector=None,
     ) -> bool:
         signals = signals or {}
-        if signals.get("risk_alert"):
+        if signal_forces_handoff(signals):
             return True
         if any(kw in context for kw in urgent_keywords()):
             return True

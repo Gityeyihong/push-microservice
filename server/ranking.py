@@ -5,13 +5,18 @@ Intent rules and exclusion rules are loaded from config/keywords.json.
 
 from __future__ import annotations
 
+import importlib
+import math
+import os
 from typing import Any
 
+from .config import SERVICE_SOFTMAX_TEMP
 from .models import CandidateItem
 from policy.keywords import (
     exclusion_rules,
     intent_rules,
     meta_request_keywords,
+    strip_user_prefix,
 )
 
 LEXICAL_WEIGHT_MOCK = 0.82
@@ -32,15 +37,9 @@ def extract_last_user_message(context: str) -> str:
 def extract_user_messages(context: str) -> list[str]:
     msgs: list[str] = []
     for line in (context or "").strip().split("\n"):
-        line = line.strip()
-        if line.startswith("用户:"):
-            text = line.removeprefix("用户:").strip()
-            if text:
-                msgs.append(text)
-        elif line.lower().startswith("user:"):
-            text = line[5:].strip()
-            if text:
-                msgs.append(text)
+        text = strip_user_prefix(line)
+        if text:
+            msgs.append(text)
     return msgs
 
 
@@ -184,14 +183,14 @@ def keyword_overlap_boost(user: str, meta: dict[str, Any]) -> float:
     return boost
 
 
-def _normalize_vector_scores(candidates: list[CandidateItem]) -> dict[str, float]:
-    sims = [float(c.similarity) for c in candidates]
-    lo, hi = min(sims), max(sims)
-    span = hi - lo
-    out: dict[str, float] = {}
-    for c in candidates:
-        out[c.item_id] = 0.5 if span < 1e-6 else (float(c.similarity) - lo) / span
-    return out
+def _softmax_probs(scores: list[float], temperature: float = SERVICE_SOFTMAX_TEMP) -> list[float]:
+    if not scores:
+        return []
+    temp = temperature if temperature > 0 else 1.0
+    peak = max(scores)
+    exps = [math.exp((score - peak) / temp) for score in scores]
+    total = sum(exps) or 1.0
+    return [value / total for value in exps]
 
 
 def _blend_score(vec_norm: float, lexical: float, boost: float, *, lexical_primary: bool, strong_intent: bool) -> float:
@@ -226,8 +225,8 @@ def inject_lexical_rescues(
                     lex,
                     CandidateItem(
                         item_id=iid,
-                        similarity=lex,
-                        prob_base=0.1,
+                        similarity=0.0,
+                        prob_base=0.0,
                         title=str(meta.get("title") or ""),
                         media_url=str(meta.get("media_url") or meta.get("cover_url") or ""),
                         duration_sec=float(meta.get("duration_sec") or 60),
@@ -240,6 +239,39 @@ def inject_lexical_rescues(
     return candidates + [c for _, c in rescues[:LEXICAL_RESCUE_MAX]]
 
 
+def _intent_value(intent: Any | None, name: str, default: Any = None) -> Any:
+    if intent is None:
+        return default
+    if isinstance(intent, dict):
+        return intent.get(name, default)
+    return getattr(intent, name, default)
+
+
+def _candidate_allowed(
+    cand: CandidateItem,
+    meta_by_id: dict[str, dict[str, Any]],
+    wanted_type: str,
+    excluded: list[str],
+) -> bool:
+    meta = meta_by_id.get(cand.item_id, {"title": cand.title})
+    if wanted_type:
+        actual = str(meta.get("item_type") or cand.item_type or "item").lower()
+        if actual != wanted_type:
+            return False
+    return not any(_topic_hit(meta, topic) for topic in excluded)
+
+
+def _topic_hit(meta: dict[str, Any], topic: str) -> bool:
+    needle = (topic or "").strip().lower()
+    if not needle:
+        return False
+    tags = {str(tag).lower() for tag in (meta.get("tags") or [])}
+    return needle in tags or needle in _meta_blob(meta)
+
+
+_PRIMARY_TOPIC_BOOST = 0.15
+
+
 def apply_ranking(
     context: str,
     candidates: list[CandidateItem | dict[str, Any]],
@@ -247,35 +279,64 @@ def apply_ranking(
     *,
     lexical_primary: bool = False,
     intent: Any | None = None,
+    item_type: str | None = None,
 ) -> list[CandidateItem]:
     """Rerank candidates by blended lexical + vector score."""
     if not candidates:
         return []
     candidates = [_as_candidate(c) for c in candidates]
     meta_by_id = {m.get("item_id"): m for m in item_metadata if m.get("item_id")}
+    wanted_type = (item_type or "").strip().lower()
+    if wanted_type:
+        candidates = [
+            cand
+            for cand in candidates
+            if str(cand.item_type or meta_by_id.get(cand.item_id, {}).get("item_type") or "item").lower()
+            == wanted_type
+        ]
+    excluded = [str(topic) for topic in (_intent_value(intent, "exclude_topics") or []) if str(topic).strip()]
+    if excluded:
+        candidates = [
+            cand
+            for cand in candidates
+            if not any(_topic_hit(meta_by_id.get(cand.item_id, {"title": cand.title}), topic) for topic in excluded)
+        ]
+    if not candidates:
+        return []
+    primary_topic = str(_intent_value(intent, "primary_topic") or "").strip()
     user = resolve_intent_query(context, intent)
     strong_intent = bool(_active_rules(user))
     candidates = inject_lexical_rescues(user, candidates, item_metadata)
-    vec_norm_map = _normalize_vector_scores(candidates)
+    candidates = [
+        cand
+        for cand in candidates
+        if _candidate_allowed(cand, meta_by_id, wanted_type, excluded)
+    ]
+    if not candidates:
+        return []
 
     scored: list[tuple[float, CandidateItem, dict[str, Any]]] = []
     for cand in candidates:
         meta = meta_by_id.get(cand.item_id, {"title": cand.title})
         lexical = compute_lexical_score(user, meta)
         boost = keyword_overlap_boost(user, meta)
-        vec_norm = vec_norm_map[cand.item_id]
-        adj = _blend_score(vec_norm, lexical, boost, lexical_primary=lexical_primary, strong_intent=strong_intent)
+        vec_component = max(0.0, min(1.0, float(cand.similarity)))
+        adj = _blend_score(vec_component, lexical, boost, lexical_primary=lexical_primary, strong_intent=strong_intent)
+        if primary_topic and _topic_hit(meta, primary_topic):
+            adj += _PRIMARY_TOPIC_BOOST
         scored.append((adj, cand, meta))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+    probs = _softmax_probs([adj for adj, _, _ in scored])
     result: list[CandidateItem] = []
-    for adj, cand, meta in scored:
+    for (_adj, cand, meta), prob in zip(scored, probs):
+        retrieval = max(-1.0, min(1.0, float(cand.similarity)))
         result.append(
             CandidateItem(
                 item_id=cand.item_id,
                 item_type=cand.item_type,
-                similarity=round(adj, 4),
-                prob_base=cand.prob_base,
+                similarity=round(retrieval, 4),
+                prob_base=round(prob, 4),
                 title=cand.title,
                 media_url=cand.media_url or str(meta.get("media_url") or meta.get("cover_url") or ""),
                 duration_sec=cand.duration_sec,
@@ -283,3 +344,36 @@ def apply_ranking(
             )
         )
     return result
+
+
+class BuiltinRanker:
+    """Default ranker: lexical + vector blend in apply_ranking."""
+
+    def rank(
+        self,
+        context: str,
+        candidates: list[CandidateItem | dict[str, Any]],
+        item_metadata: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> list[CandidateItem]:
+        return apply_ranking(
+            context,
+            candidates,
+            item_metadata,
+            lexical_primary=bool(kwargs.get("lexical_primary", False)),
+            intent=kwargs.get("intent"),
+            item_type=kwargs.get("item_type"),
+        )
+
+
+def load_ranker(provider: str | None = None) -> BuiltinRanker:
+    """Load builtin:default or module.path:ClassName (class implements rank())."""
+    provider = (provider or os.environ.get("RANKER_PROVIDER", "builtin:default")).strip() or "builtin:default"
+    if provider in ("builtin:default", "builtin", "default"):
+        return BuiltinRanker()
+    module_name, _, attr = provider.partition(":")
+    if not attr or module_name == "builtin":
+        return BuiltinRanker()
+    module = importlib.import_module(module_name)
+    cls = getattr(module, attr)
+    return cls()

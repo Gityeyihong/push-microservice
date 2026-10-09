@@ -151,10 +151,11 @@ class ExternalReviewer:
         if not url.rstrip("/").endswith("completions"):
             url = url.rstrip("/") + "/v1/chat/completions"
         prompt = (
-            "判断下面这条检索训练样本是否应作为正例（用户意图与目标视频语义一致且质量合格）。\n"
-            f"意图: {sample.get('anchor', '')}\n"
-            f"目标视频: {sample.get('positive', '')}\n"
-            '只返回 JSON: {"approved": true|false, "reason": "..."}'
+            "Decide whether this retrieval training pair is a valid positive "
+            "(the user intent matches the target item and the item is acceptable).\n"
+            f"intent: {sample.get('anchor', '')}\n"
+            f"target item: {sample.get('positive', '')}\n"
+            'Return JSON only: {"approved": true|false, "reason": "..."}'
         )
         body = {
             "model": self.model,

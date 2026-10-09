@@ -1,11 +1,12 @@
 # HTTP 接口
 
-默认监听 `0.0.0.0:8000`。除 `/health` 外均需鉴权。
+默认监听 `0.0.0.0:8000`。`/health` 是进程存活。`/ready` 在索引缺失或 Redis 不可用时返回 503，Compose 用它做健康检查。`PUSH_ENV=production` 时，占位 `HMAC_SECRET_KEY`、空的 `PUSH_API_TOKEN` / `PUSH_ADMIN_TOKEN` / `PUSH_INTERNAL_TOKEN`、占位或空的 `REDIS_PASSWORD`、或 `PUSH_USE_MOCK_VECTORS=1` 会使进程拒绝启动。`/api/v1/*` 默认按客户端地址每分钟 120 次（`PUSH_RATE_LIMIT_PER_MIN`）。只有直连对端属于 `PUSH_TRUSTED_PROXIES` 时才使用 `X-Forwarded-For`。请求体超过 `PUSH_MAX_BODY_BYTES`（默认 262144）返回 413。`production` 关闭 `/docs`。
 
 ## 鉴权
 
 | 分组 | 头 | 令牌来源 |
 |------|----|----------|
+| `/api/v1/*` | `Authorization: Bearer <token>` | `PUSH_API_TOKEN`。未设置时开放，便于本地启动 |
 | `/admin/*` | `Authorization: Bearer <token>` | `PUSH_ADMIN_TOKEN`（未配置 503） |
 | `/internal/*` | `X-Internal-Token: <token>` | `PUSH_INTERNAL_TOKEN`，回退 `PUSH_ADMIN_TOKEN` |
 
@@ -13,11 +14,17 @@
 
 ### `GET /health`
 
+进程存活。Redis 掉线时这里仍是 `ok`。
+
 ```json
 { "status": "ok", "redis": false, "push_use_mock_vectors": "0",
   "encoder": "real", "model": "paraphrase-multilingual-MiniLM-L12-v2",
   "vector_mode": "real", "item_count": 30 }
 ```
+
+### `GET /ready`
+
+索引未加载或 Redis 不可用返回 503。看门狗探测 `/health`，编排用 `/ready` 决定是否接入流量。
 
 ### `POST /api/v1/push`
 
@@ -25,13 +32,18 @@
 {
   "context": "user: can you recommend a tutorial on integrations",
   "positive_rate": 0.6,
+  "trigger_mode": "auto",
+  "item_type": "article",
+  "experiment_id": null,
   "signals": { "risk_alert": false },
   "state": "INIT",
   "session_id": "s-1",
   "intent": { "primary_topic": "integrations", "query": "integration tutorial",
-              "exclude_topics": [], "is_meta": false, "content_need": "item", "confidence": 0.8 }
+              "exclude_topics": ["billing"], "is_meta": false, "content_need": "item", "confidence": 0.8 }
 }
 ```
+
+`trigger_mode=active` 在有候选时直接走主动推荐；`auto` 仍按关键词判断。`item_type` 只保留同类型候选。`experiment_id` 填策略画像名则强制该画像；填当前实验名则仍按 `session_id` 分桶；未知值返回 400。`intent.primary_topic` 给命中标签或正文的候选加分，`exclude_topics` 去掉命中项。`content_need=none` 不改变决策，`item` 在没有强制转人工信号时不转人工，`handoff` 优先转人工。负荷、亲密度和催促由会话状态计算，请求体里不再接受这些字段。
 
 响应：
 
@@ -57,9 +69,9 @@
   "watch_duration_sec": 40, "item_duration_sec": 60, "session_id": "s-1" }
 ```
 
-`event` ∈ `exposed|click|watch_end|dismiss|no_click|share|favorite|not_interested`。
+`event` ∈ `exposed|click|watch_end|dwell_end|dismiss|no_click|share|favorite|not_interested`。`watch_end` 与 `dwell_end` 等价，按停留时长占比分类。
 
-响应：`{ "accepted": true, "classified_feedback": "positive", "reason": "watch_above_threshold" }`
+响应：`{ "accepted": true, "classified_feedback": "positive", "reason": "dwell_above_threshold" }`
 
 ## 管理（`/admin`，Bearer）
 

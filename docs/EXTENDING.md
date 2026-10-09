@@ -22,7 +22,7 @@ class MyPolicy(DecisionPolicy):
         return {"feedback_type": None, "reason": "noop"}
 ```
 
-启用：`POLICY_PROVIDER=myapp.policies:MyPolicy`（或 `config/policy.json` 配 `policy.provider`）。
+启用：环境变量 `POLICY_PROVIDER` 优先；未设置时读 `config/policy.json` 的 `provider`（默认 `builtin:default`）。
 
 ## 2. 转人工策略 `HandoffPolicy`
 
@@ -39,6 +39,16 @@ class MyHandoff(HandoffPolicy):
 ```
 
 启用：`HANDOFF_PROVIDER=myapp.handoff:MyHandoff`。
+
+## 2.1 排序 `Ranker`
+
+```python
+class MyRanker:
+    def rank(self, context, candidates, item_metadata, **kwargs):
+        return candidates
+```
+
+启用：`RANKER_PROVIDER=myapp.ranking:MyRanker`（默认 `builtin:default`，即现有词法/向量融合）。
 
 ## 3. 奖励适配器 `RewardAdapter`（自训练）
 
@@ -65,11 +75,14 @@ class MyReward(RewardAdapter):
 - `intent_rules`：`user_kws → item_kws / tag_boost / weight`，用于词法重排。
 - `exclusion_rules`：跨主题惩罚。
 - `urgent_keywords`、`sensitive_topics`、`helpless_keywords`。
+- `context.user_prefixes`：从对话里抽取用户句的行前缀。
+- `signals.force_handoff`：为真时强制建议转人工的信号名（默认 `risk_alert`）。
 
 ## 5. 目录与向量
 
 - 用 `scripts/import_catalog.py` 导入 CSV/JSON 目录，或直接替换 `data/catalog.json`。
-- 重建向量：`python -m data.generate_data`（或 `--mock`）。
+- 重建向量：`python -m data.generate_data`（或 `--mock`）。产物为 `item_embeddings.npy` 与 `item_topic_vecs.npy`；若只存在旧文件名 `video_embeddings.npy` / `video_topic_vecs.npy`，服务会回退读取。
+- 目录文件：`PUSH_CATALOG`（优先）或 `PUSH_VIDEOS`。
 - 热重载：`POST /admin/items/reload`。
 
 ## 6. 存储后端

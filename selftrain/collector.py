@@ -92,9 +92,6 @@ class TrainingCollector:
 
 
 def _last_user(context: str) -> str:
-    for line in reversed((context or "").strip().splitlines()):
-        s = line.strip()
-        for prefix in ("用户:", "用户：", "user:", "User:"):
-            if s.startswith(prefix):
-                return s[len(prefix):].strip()
-    return (context or "").strip()[:200]
+    from policy.keywords import last_user_utterance
+
+    return last_user_utterance(context) or (context or "").strip()[:200]

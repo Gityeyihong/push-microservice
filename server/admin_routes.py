@@ -19,6 +19,7 @@ from .ab_resolver import (
     save_profiles,
 )
 from .models import PolicyConfigModel
+from .security import check_bearer
 
 router = APIRouter(prefix="/admin", tags=["push-admin"])
 
@@ -27,14 +28,19 @@ def require_push_admin(authorization: str | None = Header(default=None)) -> None
     token = os.environ.get("PUSH_ADMIN_TOKEN", "").strip()
     if not token:
         raise HTTPException(status_code=503, detail="PUSH_ADMIN_TOKEN not configured")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-    if authorization.removeprefix("Bearer ").strip() != token:
-        raise HTTPException(status_code=403, detail="Invalid admin token")
+    check_bearer(authorization, token)
 
 
 def _sessions_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "sessions"
+
+
+async def _metrics_snapshot() -> dict:
+    from .metrics import snapshot
+
+    from .main import cache_service
+
+    return await snapshot(cache_service)
 
 
 def _touch_config_mtime() -> None:
@@ -53,6 +59,7 @@ async def admin_status(_: None = Depends(require_push_admin)):
         "redis": cache_service.available,
         "encoder": enc,
         "policy_config": _current_policy_config().model_dump(),
+        "metrics": await _metrics_snapshot(),
         **get_ab_status(),
     }
 

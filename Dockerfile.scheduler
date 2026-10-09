@@ -1,0 +1,12 @@
+# 在已构建的服务镜像上安装训练依赖。不要在容器启动时 pip install。
+# docker compose build && docker compose -f docker-compose.yml -f docker-compose.scheduler.yml build scheduler
+ARG BASE_IMAGE=push-microservice:latest
+FROM ${BASE_IMAGE}
+
+USER root
+COPY requirements-train.txt /tmp/requirements-train.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-train.txt \
+    && rm /tmp/requirements-train.txt
+
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
+CMD ["python", "-m", "selftrain.scheduler"]

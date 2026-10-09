@@ -1,4 +1,4 @@
-"""Pytest bootstrap: ensure project root is importable as `server` / `mobile` / `selftrain`."""
+"""Pytest bootstrap: ensure project root is importable as `server` / `policy` / `selftrain`."""
 
 import sys
 from pathlib import Path

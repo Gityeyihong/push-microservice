@@ -1,11 +1,21 @@
 import hashlib
 import hmac
 import json
+import logging
+import os
 from typing import Optional, List, Dict, Any
 
 import redis.asyncio as aioredis
 
 from .config import REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_TTL, HMAC_SECRET_KEY
+
+
+def _redis_password() -> str | None:
+    password = os.getenv("REDIS_PASSWORD", "").strip()
+    return password or None
+
+
+logger = logging.getLogger(__name__)
 
 
 class CacheService:
@@ -18,12 +28,14 @@ class CacheService:
                 host=REDIS_HOST,
                 port=REDIS_PORT,
                 db=REDIS_DB,
+                password=_redis_password(),
                 decode_responses=True,
                 socket_connect_timeout=2,
                 socket_timeout=2,
             )
             await self.redis.ping()
-        except Exception:
+        except Exception as exc:
+            logger.warning("redis cache connect failed: %s", exc)
             self.redis = None
 
     async def disconnect(self):
@@ -33,11 +45,12 @@ class CacheService:
 
     @staticmethod
     def generate_key(context: str) -> str:
-        return hmac.new(
+        digest = hmac.new(
             HMAC_SECRET_KEY.encode("utf-8"),
             context.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+        return f"push:cache:{digest}"
 
     async def get(self, context: str) -> Optional[Dict[str, Any]]:
         if not self.redis:
@@ -47,8 +60,8 @@ class CacheService:
             data = await self.redis.get(key)
             if data:
                 return json.loads(data)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("redis cache get failed: %s", exc)
         return None
 
     async def set(self, context: str, data: Dict[str, Any]):
@@ -57,13 +70,16 @@ class CacheService:
         try:
             key = self.generate_key(context)
             await self.redis.setex(key, REDIS_TTL, json.dumps(data, ensure_ascii=False))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("redis cache set failed: %s", exc)
 
     async def flush_all(self) -> bool:
         if not self.redis:
             return False
-        await self.redis.flushdb()
+        removed = 0
+        async for key in self.redis.scan_iter(match="push:cache:*", count=200):
+            removed += int(await self.redis.delete(key))
+        logger.info("flushed %d cache keys", removed)
         return True
 
     @property

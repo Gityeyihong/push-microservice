@@ -7,11 +7,16 @@ __pycache__
 .venv
 venv
 
+# secrets — never bake a local env file into an image
+.env
+.env.*
+!.env.example
+
 # runtime / local state
 data/sessions
 data/training
 logs
-reports/*.jsonl
+reports/
 
 # tests & docs not needed at runtime
 tests

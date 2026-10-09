@@ -1,0 +1,12 @@
+Push Microservice
+Copyright 2026 Push Microservice Contributors
+
+This product includes the sentence-embedding model
+paraphrase-multilingual-MiniLM-L12-v2, published by the UKP Lab
+(Technische Universität Darmstadt) and distributed via Hugging Face
+under the Apache License, Version 2.0.
+
+https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+
+The model is loaded through the sentence-transformers library
+(Apache License, Version 2.0): https://github.com/UKPLab/sentence-transformers

@@ -12,6 +12,7 @@ Modules:
     registry    versioned model registry + active pointer + rollback
     evaluator   held-out retrieval metrics
     loop        orchestration
+    scheduler   separate process (`python -m selftrain.scheduler`), not started by the API
 """
 
 from .constants import load_training_config, DEFAULT_CONFIG  # noqa: F401

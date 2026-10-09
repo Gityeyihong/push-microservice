@@ -20,11 +20,13 @@ data/vector_manifest.json
 
 # Runtime state / logs
 data/sessions/*.json
+data/sessions/*.lock
 !data/sessions/.gitkeep
 data/policy_state.json
 data/admin_audit.jsonl
 logs/
 reports/*.jsonl
+reports/*.lock
 
 # Training artifacts
 data/training/*.jsonl

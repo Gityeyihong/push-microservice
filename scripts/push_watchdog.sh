@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Push 存活探测：/health 失败则重启 push 容器（或 docker compose up -d）
+# Push 进程存活：/health 失败则重启容器。依赖是否就绪看 /ready，不要拿它触发重启。
 # 用法：cron/systemd 每小时执行；或手动 bash push_watchdog.sh
 set -euo pipefail
 

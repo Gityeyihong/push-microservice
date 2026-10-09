@@ -1,7 +1,9 @@
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-sentence-transformers>=2.2.0
-faiss-cpu>=1.7.4
-redis>=5.0.0
-numpy>=1.24.0
-gunicorn>=21.2.0
+# Versions pinned to the set exercised by the default test suite.
+# Serving starts with uvicorn. gunicorn is optional and unused by the image command.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sentence-transformers==6.0.0
+faiss-cpu==1.15.0
+redis==8.1.0
+numpy==2.4.6
+gunicorn==23.0.0
