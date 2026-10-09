@@ -4,8 +4,8 @@ sentence-transformers>=2.2.0
 torch>=2.0.0
 accelerate>=0.27.0
 
-# 训练数据存储（SQLite 回退 + Postgres）
-SQLAlchemy>=2.0
+# 训练数据存储（SQLite 回退 + Postgres）。asyncio 额外依赖包含 greenlet。
+SQLAlchemy[asyncio]>=2.0
 aiosqlite>=0.19
 asyncpg>=0.29
 
