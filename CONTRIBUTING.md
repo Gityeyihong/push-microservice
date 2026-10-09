@@ -8,6 +8,6 @@
 本地检查：
 
 ```powershell
-pip install -r requirements.txt -r requirements-train.txt
+pip install -r requirements.txt -r requirements-train.txt -r requirements-dev.txt
 pytest
 ```
